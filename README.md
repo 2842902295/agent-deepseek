@@ -17,6 +17,7 @@
 ![LangGraph](https://img.shields.io/badge/LangGraph-Deep%20Agents-000?logo=langchain&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-enabled-7c3aed)
 ![Docker](https://img.shields.io/badge/Docker-one--click%20deploy-2496ED?logo=docker&logoColor=white)
+[![visits](https://visitor-badge.laobi.icu/badge?page_id=2842902295.agent-deepseek&title=visits)](https://github.com/2842902295/agent-deepseek)
 
 🔗 **在线预览**：[agent-deepseek.com](https://agent-deepseek.com)
 
@@ -369,6 +370,10 @@ python pack_desktop.py   # 产出可双击安装的 setup.exe（Inno Setup）+ �
 
 欢迎提交 Pull Request 或 Issue。Bug 修复、新技能、新工具、文档完善都非常欢迎。
 
+<a href="https://github.com/2842902295/agent-deepseek/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=2842902295/agent-deepseek" alt="contributors" />
+</a>
+
 ## 🙏 致谢
 
 本项目站在以下优秀开源项目的肩膀上：
@@ -379,6 +384,10 @@ python pack_desktop.py   # 产出可双击安装的 setup.exe（Inno Setup）+ �
 - [SoybeanAdmin](https://github.com/soybeanjs/soybean-admin)
 - [Tortoise ORM](https://tortoise.github.io)
 - [Naive UI](https://www.naiveui.com/)
+
+## ⭐ Star 趋势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=2842902295/agent-deepseek&type=Date)](https://star-history.com/#2842902295/agent-deepseek&Date)
 
 ## 📄 开源协议
 
