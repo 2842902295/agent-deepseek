@@ -1,0 +1,21 @@
+{
+  "name": "AI 助理中心",
+  "short_name": "AI 助理",
+  "description": "AI Agent 工作台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "lang": "zh",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/xiaonian-logo.png",
+      "type": "image/png",
+      "sizes": "688x688",
+      "purpose": "any"
+    }
+  ]
+}

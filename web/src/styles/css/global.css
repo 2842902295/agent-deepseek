@@ -1,0 +1,35 @@
+@import './reset.css';
+@import './nprogress.css';
+@import './transition.css';
+
+html,
+body,
+#app {
+  height: 100%;
+  text-autospace: normal;
+}
+
+html {
+  overflow-x: hidden;
+  color: rgb(var(--base-text-color));
+}
+
+/* 全局滚动条美化 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(30, 64, 175, 0.22) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(30, 64, 175, 0.22);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(30, 64, 175, 0.4);
+}

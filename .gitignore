@@ -1,0 +1,116 @@
+# ========================
+# Python / Backend
+# ========================
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.pdm-python
+.python-version
+
+# ========================
+# Database & Migrations
+# ========================
+*.sqlite3
+*.sqlite3-journal
+tortoise_queries.json
+tortoise_last.txt
+
+# ========================
+# Logs
+# ========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ========================
+# Node / Frontend
+# ========================
+node_modules/
+web/dist/
+web/dist-ssr/
+web/coverage/
+web/.VSCodeCounter/
+web/.pnpm-store/
+web/.build_fingerprint
+*.local
+
+# ========================
+# IDE & OS
+# ========================
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+.DS_Store
+._.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ========================
+# Docker runtime
+# ========================
+redis_data/
+
+# ========================
+# Secrets & env overrides
+# ========================
+.env.local
+.env.*.local
+
+# ========================
+# Testing
+# ========================
+web/cypress/videos/
+web/cypress/screenshots/
+
+# Editor directories and files
+/web/.vscode/*
+/web/!.vscode/extensions.json
+/web/!.vscode/settings.json
+/web/!.vscode/launch.json
+/web/.idea
+/web/*.suo
+/web/*.ntvs*
+/web/*.njsproj
+/web/*.sln
+/web/*.sw?
+
+/web/.VSCodeCounter
+/web/packages/scripts/node_modules/*
+/web/packages/axios/node_modules/*
+/web/packages/color/node_modules/*
+/web/packages/hooks/node_modules/*
+/web/packages/materials/node_modules/*
+/web/packages/ofetch/node_modules/*
+/web/packages/utils/node_modules/*
+/web/.pnpm-store/*
+/temp_script/
+/temp_doc/
+/data/
+/deploy_package_*.zip
+
+.codex/
+.claude/
+.tmp_images/
+.extraction_log/
+.qa_workspace/
+/app_system.sqlite3-shm
+/app_system.sqlite3-wal
+/offline_deploy/
+/.agent_workspace/*
+!/.agent_workspace/.agent_skills/
+/desktop_dist/*

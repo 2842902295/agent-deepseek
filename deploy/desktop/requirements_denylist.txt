@@ -1,0 +1,13 @@
+# 桌面瘦包依赖剔除名单（按 pip 包名匹配，不区分大小写；支持 `前缀*` 通配）
+# 主剔除：体积大头（torch 及其拖入的 NVIDIA CUDA 运行库）。核心版 app/ 从不 import 这些。
+torch
+sentence-transformers
+triton
+nvidia-*
+
+# [secondary] 次级剔除：浏览器自动化栈（核心版不用）。选"剔除次级"时一并剔除，
+# 会使浏览器自动化类 skill 在桌面版不可用（有意裁剪）。
+[secondary]
+crawl4ai
+playwright
+playwright-stealth

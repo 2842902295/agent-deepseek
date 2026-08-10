@@ -1,0 +1,16 @@
+packages:
+  - 'packages/*'
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  '@vue-office/docx': set this to true or false
+  '@vue-office/excel': set this to true or false
+  '@vue-office/pdf': set this to true or false
+  '@vue-office/pptx': set this to true or false
+  core-js: set this to true or false
+  core-js-pure: set this to true or false
+  es5-ext: set this to true or false
+  esbuild: set this to true or false
+  simple-git-hooks: set this to true or false
+  typeit: set this to true or false
+  unrs-resolver: set this to true or false
+  vue-demi: set this to true or false
