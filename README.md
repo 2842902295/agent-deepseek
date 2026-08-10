@@ -387,7 +387,13 @@ python pack_desktop.py   # 产出可双击安装的 setup.exe（Inno Setup）+ �
 
 ## ⭐ Star 趋势
 
-[![Star History Chart](https://api.star-history.com/svg?repos=2842902295/agent-deepseek&type=Date)](https://star-history.com/#2842902295/agent-deepseek&Date)
+<a href="https://www.star-history.com/?repos=2842902295%2Fagent-deepseek&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=2842902295/agent-deepseek&type=date&theme=dark&legend=top-left&sealed_token=AEZkII86VqzcTsJ9v8cXRnqgPm1DW8PiSjqb3MRuzjD2UgVS_y5WA3mqExPaeIZ-y7uf9H7uW-G4tgZYr-B0BH-3aoSLpmGNWg6kGT79VVgkavyGZGAKMzNEg4OjbbmvJ5xU7EFAa62EFZKAmIbEmgHMyuyFXhRiZnzsTbXrKLhr2FxYYMD8XtUHzAvK" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=2842902295/agent-deepseek&type=date&legend=top-left&sealed_token=AEZkII86VqzcTsJ9v8cXRnqgPm1DW8PiSjqb3MRuzjD2UgVS_y5WA3mqExPaeIZ-y7uf9H7uW-G4tgZYr-B0BH-3aoSLpmGNWg6kGT79VVgkavyGZGAKMzNEg4OjbbmvJ5xU7EFAa62EFZKAmIbEmgHMyuyFXhRiZnzsTbXrKLhr2FxYYMD8XtUHzAvK" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=2842902295/agent-deepseek&type=date&legend=top-left&sealed_token=AEZkII86VqzcTsJ9v8cXRnqgPm1DW8PiSjqb3MRuzjD2UgVS_y5WA3mqExPaeIZ-y7uf9H7uW-G4tgZYr-B0BH-3aoSLpmGNWg6kGT79VVgkavyGZGAKMzNEg4OjbbmvJ5xU7EFAa62EFZKAmIbEmgHMyuyFXhRiZnzsTbXrKLhr2FxYYMD8XtUHzAvK" />
+ </picture>
+</a>
 
 ## 📄 开源协议
 
