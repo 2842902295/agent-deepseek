@@ -332,11 +332,11 @@ def git_push(dry_run: bool, no_push: bool, force: bool, message: str = "") -> No
         push_cmd = ["git", *cfg, "push"] + (["-f"] if force else []) + ["-u", "origin", BRANCH]
         r = run(push_cmd, DST, check=False)
         out = (r.stdout or "") + (r.stderr or "")
+        if "Everything up-to-date" in out:  # 旧 ref 缓存等场景下可能伴随非零返回码，先于成败判断识别
+            log(f"[git] 远端已是最新，无需推送（{label}）")
+            return
         if r.returncode == 0:
-            if "Everything up-to-date" in out:
-                log(f"[git] 远端已是最新，无需推送（{label}）")
-            else:
-                log(f"[git] 已推送到 {REMOTE_URL}（{BRANCH}，{label}）")
+            log(f"[git] 已推送到 {REMOTE_URL}（{BRANCH}，{label}）")
             return
         err = out.strip()
         log(f"[git] {label}推送失败：{err.splitlines()[-1] if err else '未知错误'}")
