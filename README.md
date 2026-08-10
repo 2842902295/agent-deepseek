@@ -147,6 +147,11 @@
 
 ## 🏗️ 技术架构
 
+<!-- 架构图占位：整体架构图（建议展示：浏览器 / 手机 → Nginx → FastAPI → Agent 运行时 → OceanBase / Redis / 外部模型 API），放到 docs/screenshots/architecture.png -->
+<p align="center">
+  <img src="screenshots/architecture.png" alt="整体架构图" width="100%" />
+</p>
+
 ### 后端（`/app`）
 
 ```
