@@ -472,6 +472,12 @@ async def modify_db():
     except Exception:
         pass  # 列已存在则忽略
 
+    # 补齐用户对话偏好的过程展示开关（流式时自动展开工具调用过程；默认 0=一直收折）
+    try:
+        await conn_std.execute_script("ALTER TABLE agent_user_chat_pref ADD COLUMN tool_process_expand TINYINT NOT NULL DEFAULT 0;")
+    except Exception:
+        pass  # 列已存在则忽略
+
     # 存量回填：本机 apps 目录里已有 index.html 的看板把标志立起来（上线前发布的板也认账）
     try:
         from app.api.v1.ai.agent_workflow import backfill_entry_ready
@@ -608,7 +614,7 @@ async def modify_db():
                 source_table VARCHAR(64) NOT NULL COMMENT '来源表名',
                 source_id BIGINT NOT NULL COMMENT '来源记录ID',
                 file_name TEXT NULL COMMENT '图片文件名',
-                status VARCHAR(16) NOT NULL COMMENT 'ok/failed',
+                status VARCHAR(16) NOT NULL COMMENT 'ok/failed/dead',
                 error_msg TEXT NULL COMMENT '失败原因',
                 elapsed_ms INT NULL COMMENT '处理耗时(ms)',
                 create_time DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),

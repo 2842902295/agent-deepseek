@@ -215,10 +215,10 @@ class AgentCompatibleChat(ChatOpenAI):
         # 落入 checkpoint 后每轮都会 400），发请求前统一替换为文本占位符
         _sanitize_dashscope_payload(payload, self.openai_api_base)
 
-        # kimi-k3 只接受 temperature=0.6，代码中多处硬编码了其他值（0.1/0.2/0.7），
-        # 在此统一拦截，避免 400 错误
+        # 百炼直供 kimi/kimi-k3（model 名精确等于它才算）只接受 temperature=0.6，
+        # 在此统一拦截避免 400；其它转发渠道的 kimi-k3（如官方转发的裸名 kimi-k3）不受此限
         _model = (payload.get("model") or "").lower()
-        if "kimi-k3" in _model and payload.get("temperature") != 0.6:
+        if _model == "kimi/kimi-k3" and payload.get("temperature") != 0.6:
             logger.warning(f"[LLM] {_model} 仅支持 temperature=0.6，已将 {payload.get('temperature')} 强制覆盖")
             payload["temperature"] = 0.6
 
@@ -328,9 +328,10 @@ def _build_thinking_extra_body(cfg: RoleConfig, thinking: Optional[Union[bool, s
         off = thinking == "none"
         if _is_ollama(cfg):
             return {"think": not off}
-        # kimi-k3：网关拒收 none（误导性 400，见下方 bool 分支注释），minimal 是地板；
-        # low/high/max 原样透传（阿里云直供文档白名单）
-        if "kimi-k3" in model:
+        # 百炼直供 kimi/kimi-k3（精确匹配 model 名）：网关拒收 none（误导性 400，
+        # 见下方 bool 分支注释），minimal 是地板；low/high/max 原样透传。
+        # 其它转发渠道的 kimi-k3（裸名等）不收此限，none 原样透传即可真关思考
+        if model == "kimi/kimi-k3":
             return {"reasoning_effort": "minimal" if off else thinking}
         # 百炼直供 deepseek（v4-pro 等）收 reasoning_effort（high/max，网关自映射
         # low/medium→high）；"关"没有 wire 档位（恒开思考模型不配 none），仅 env 路径
@@ -352,13 +353,14 @@ def _build_thinking_extra_body(cfg: RoleConfig, thinking: Optional[Union[bool, s
     # ── 以下为 bool 开/关档，按 provider 原生参数翻译 ──────────────────────
     if _is_ollama(cfg):
         return {"think": thinking}
-    # kimi-k3（百炼网关）无法完全关闭思考：enable_thinking=false / thinking.type=disabled /
+    # 百炼直供 kimi/kimi-k3（精确匹配 model 名，其它转发渠道不受此限）无法完全关闭思考：
+    # enable_thinking=false / thinking.type=disabled /
     # reasoning_effort=none 都会被网关以【误导性】400「invalid temperature: only 0.6 is allowed」
     # 拒绝——实测该报错与温度无关，真正原因是这些关思考参数不被接受；只认
     # reasoning_effort 分档（none 被拒，minimal 是地板）。
     # False → reasoning_effort=minimal 把思考压到最低（流式实测 ~2000→~110 字，且不再
     # 烧光 max_tokens 导致 content 为空）；True → 不发参数，保持全量思考。
-    if "kimi-k3" in model:
+    if model == "kimi/kimi-k3":
         return {} if thinking else {"reasoning_effort": "minimal"}
     if ("dashscope" in base or "aliyuncs" in base) and ("deepseek" in model or "claude" in model):
         return {"thinking": {"type": "enabled" if thinking else "disabled"}}

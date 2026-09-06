@@ -85,6 +85,13 @@ def create_app() -> FastAPI:
         mount_sse_proxy(_app)
     except Exception as _e:
         log.warning(f"SSE 连接器代理挂载失败（不影响主服务）: {_e}")
+    # 应用制作「互动接口」MCP 桥：按 apps/{wk}/mcp.json manifest 托管真实 MCP 服务
+    try:
+        from app.mcp_bridge.app_board_bridge import mount_app_board_bridge
+
+        mount_app_board_bridge(_app)
+    except Exception as _e:
+        log.warning(f"应用互动桥挂载失败（不影响主服务）: {_e}")
     return _app
 
 
@@ -127,6 +134,14 @@ async def lifespan(_app: FastAPI):
         await start_proxy()
     except Exception as _e:
         log.warning(f"[lifespan] SSE 代理 session manager 启动失败（SSE 连接器不可用）: {_e}")
+
+    # 应用制作互动桥 session manager（失败不阻塞启动）
+    try:
+        from app.mcp_bridge.app_board_bridge import start_app_board_bridge
+
+        await start_app_board_bridge()
+    except Exception as _e:
+        log.warning(f"[lifespan] 应用互动桥 session manager 启动失败（互动接口不可用）: {_e}")
 
     # 清理 compare-smart 比对锁的残留 key。
     # 这些锁是 Redis SET NX PX（TTL 2h）防重复提交，进程被 kill / 重启时不会主动释放，
@@ -510,6 +525,12 @@ async def lifespan(_app: FastAPI):
             await stop_dataset_bridges()
         except Exception as _e:
             log.warning(f"关闭数据集桥失败：{_e}")
+        try:
+            from app.mcp_bridge.app_board_bridge import stop_app_board_bridge
+
+            await stop_app_board_bridge()
+        except Exception as _e:
+            log.warning(f"关闭应用互动桥失败：{_e}")
         try:
             from app.services.mysql_pool import close_pool as _close_mysql_pool
             await _close_mysql_pool()

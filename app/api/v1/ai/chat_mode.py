@@ -86,10 +86,11 @@ def _levels_payload(block_key: str) -> list[dict[str, str]]:
 
 
 class ChatModePrefUpdate(BaseModel):
-    """保存入参：两字段均可省略（省略 = 不改该项）。"""
+    """保存入参：各字段均可省略（省略 = 不改该项）。"""
 
     mode: Optional[str] = Field(None, description="对话模式 key（agent_chat_mode_config 行）")
     thinking_level: Optional[str] = Field(None, alias="thinkingLevel", description="思考强度 wire 档位值（none/low/medium/high/max，须在目标模式有效块白名单内）")
+    tool_process_expand: Optional[bool] = Field(None, alias="toolProcessExpand", description="流式输出时自动展开工具调用过程（纯前端展示偏好，不触发 agent 重建）")
 
     class Config:
         populate_by_name = True
@@ -147,7 +148,7 @@ async def get_chat_mode_pref():
     if not uid_has_cached_agent(uid):
         prewarm_user_agent(uid)
 
-    return Success(data={"mode": mode, "thinkingLevel": level, "modes": modes})
+    return Success(data={"mode": mode, "thinkingLevel": level, "toolProcessExpand": bool(pref.tool_process_expand) if pref else False, "modes": modes})
 
 
 @router.put("", summary="保存当前用户的对话模式偏好")
@@ -181,18 +182,33 @@ async def set_chat_mode_pref(payload: ChatModePrefUpdate):
     cur_level = pref.thinking_level if pref else None
     merged_level = level if level is not None else cur_level
 
-    if pref is not None and mode == cur_mode and merged_level == cur_level:
+    # 过程展示开关：纯前端偏好，不参与 agent 构建，省略即不改
+    cur_expand = bool(pref.tool_process_expand) if pref else False
+    merged_expand = payload.tool_process_expand if payload.tool_process_expand is not None else cur_expand
+    expand_changed = payload.tool_process_expand is not None and merged_expand != cur_expand
+
+    # 是否需要重建 agent：仅当模式/思考强度的有效值真的变了（新建行但值等于默认不算变）
+    mode_level_changed = mode != cur_mode or merged_level != cur_level
+
+    if not mode_level_changed and not expand_changed:
         return Success(msg="偏好未变化")
 
-    await AgentUserChatPref.update_or_create(user_id=uid, defaults={"mode": mode, "thinking_level": merged_level})
+    await AgentUserChatPref.update_or_create(
+        user_id=uid,
+        defaults={"mode": mode, "thinking_level": merged_level, "tool_process_expand": 1 if merged_expand else 0},
+    )
 
-    # 弹出该用户全部形态的缓存 agent（含 dsh 子进程关闭），随即后台预热新形态
-    #（dsh spawn + MCP 握手 + 技能同步实测 8~12s）：下一条消息直接命中热实例
-    from app.api.v1.ai.qa import _evict_user_agents, prewarm_user_agent
+    # 仅模式/档位变化才需要重建 agent：弹出该用户全部形态的缓存 agent（含 dsh 子进程关闭），
+    # 随即后台预热新形态（dsh spawn + MCP 握手 + 技能同步实测 8~12s）：下一条消息直接命中热实例。
+    # 过程展示开关变更不触碰 agent（前端即时生效），避免无谓的冷启动。
+    if mode_level_changed:
+        from app.api.v1.ai.qa import _evict_user_agents, prewarm_user_agent
 
-    _evict_user_agents(uid)
-    prewarm_user_agent(uid)
-    return Success(msg="已保存，下一条消息生效")
+        _evict_user_agents(uid)
+        prewarm_user_agent(uid)
+        return Success(msg="已保存，下一条消息生效")
+
+    return Success(msg="已保存")
 
 
 # ── 模式配置 CRUD（仅超管） ─────────────────────────────────────────────────

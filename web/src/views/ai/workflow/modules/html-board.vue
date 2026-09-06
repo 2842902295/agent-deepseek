@@ -35,6 +35,10 @@ const emit = defineEmits<{
   /** 分享态专属：看板为「仅登录用户」模式而访客未登录（后端 4000 + needLogin 标记），
    *  请宿主引导登录（带 redirect 回分享页） */
   (e: 'need-login'): void;
+  /** 应用页内经 AppBridge.sendToChat 呼叫 agent：宿主把 text 作为一条用户消息触发回合，
+   *  完成后调 respond(ok, reason?) 回执（页内据此提示 / 退避）。分享页无宿主监听 →
+   *  respond 永不被调 → AppBridge 超时静默降级 no-channel（预期行为） */
+  (e: 'app-chat', p: {text: string; respond: (ok: boolean, reason?: string) => void}): void;
 }>();
 
 defineExpose({toggleTextEdit});
@@ -155,6 +159,25 @@ function onEditStateMessage(ev: MessageEvent) {
   emit('edit-state', {editing: !!data.editing, editableCount: Number(data.editableCount) || 0});
 }
 
+// 应用页内 AppBridge.sendToChat → postMessage 呼叫 agent：转交宿主触发一个对话回合，
+// 并把结果经 ack 回发页内。只认自己 iframe 的消息（与 onEditStateMessage 同款防线）。
+function onAppChatMessage(ev: MessageEvent) {
+  const data = ev.data;
+  if (!data || typeof data !== 'object' || data.type !== 'hbte-app-chat') return;
+  if (!iframeEl.value || ev.source !== iframeEl.value.contentWindow) return;
+  const id = data.id;
+  const text = String(data.text || '').slice(0, 2000);
+  const target = iframeTargetOrigin();
+  const respond = (ok: boolean, reason?: string) => {
+    iframeEl.value?.contentWindow?.postMessage({type: 'hbte-app-chat-ack', id, ok, reason}, target);
+  };
+  if (!text.trim()) {
+    respond(false, 'empty');
+    return;
+  }
+  emit('app-chat', {text, respond});
+}
+
 // 交互解除后自动补上被延迟的重载
 watch([pointerIn, iframeFocused], ([inFrame, focused]) => {
   if (!inFrame && !focused && pendingReload.value) doReload();
@@ -173,6 +196,7 @@ onMounted(() => {
   window.addEventListener('blur', onWindowBlur);
   window.addEventListener('focus', onWindowFocus);
   window.addEventListener('message', onEditStateMessage);
+  window.addEventListener('message', onAppChatMessage);
   sign();
 });
 
@@ -180,6 +204,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('blur', onWindowBlur);
   window.removeEventListener('focus', onWindowFocus);
   window.removeEventListener('message', onEditStateMessage);
+  window.removeEventListener('message', onAppChatMessage);
   if (reloadTimer) clearTimeout(reloadTimer);
 });
 </script>

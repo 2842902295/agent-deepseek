@@ -44,7 +44,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 from tortoise.transactions import in_transaction
@@ -52,6 +52,7 @@ from tortoise.transactions import in_transaction
 from app.core.ctx import CTX_BILLING_BIZ_ENTRY, CTX_USER_ID
 from app.models.standard.agent import AgentAppRow
 from app.schemas.base import Fail, Success
+from app.services.agent_runtime import app_events
 from app.utils.security import decode_html_app_token
 
 router = APIRouter(prefix="/html-app", tags=["应用制作托管（公开）"])
@@ -168,6 +169,14 @@ _NO_STORE = {"Cache-Control": "no-store"}
 _EDIT_SCRIPT_PATH = Path(__file__).parent / "html_app_edit.js"
 _edit_script_cache: Optional[str] = None
 
+# ── 系统注入的「互动桥」window.AppBridge ───────────────────────────────────────
+# 与编辑脚本同机制（不落盘、不进存档），但**无条件注入所有 html 页面**（板主 / 访客皆然）：
+# 封装行数据读写（loadRows/putRows/delRows）、SSE 变更订阅（onChange）、反向呼叫 agent
+# （sendToChat）。页面可只用它而不手写 fetch。脚本内容不含 "</script>" 字样，裸拼安全；
+# 文件缺失则静默降级（只注入编辑脚本），存量应用零影响。
+_BRIDGE_SCRIPT_PATH = Path(__file__).parent / "html_app_bridge.js"
+_bridge_script_cache: Optional[str] = None
+
 
 def _load_edit_script() -> str:
     """读取注入脚本（首次读后进程内缓存）；文件缺失返回空串 = 能力静默关闭，不影响页面托管。"""
@@ -180,25 +189,45 @@ def _load_edit_script() -> str:
     return _edit_script_cache
 
 
-def _maybe_inject_edit_script(target: Path, file_path: str, read_only: bool = False) -> Optional[HTMLResponse]:
-    """serve 的是 html 页面 → 在最后一个 </body> 前注入编辑脚本并返回 HTMLResponse；其余文件返回 None 走原路。
+def _load_bridge_script() -> str:
+    """读取互动桥脚本（首次读后进程内缓存）；文件缺失返回空串 = 能力静默关闭。"""
+    global _bridge_script_cache
+    if _bridge_script_cache is None:
+        try:
+            _bridge_script_cache = _BRIDGE_SCRIPT_PATH.read_text(encoding="utf-8")
+        except OSError:
+            _bridge_script_cache = ""
+    return _bridge_script_cache
 
-    read_only=True（分享访客）：注入同一脚本但先置 window.__hbteReadOnly——页面加载时照常套用
-    已保存的文字替换对，但编辑开关消息被忽略、改动也不会写回（脚本与 save 通道双重设防）。"""
+
+def _maybe_inject_edit_script(target: Path, file_path: str, read_only: bool = False) -> Optional[HTMLResponse]:
+    """serve 的是 html 页面 → 在最后一个 </body> 前注入「互动桥 + 编辑」两个脚本并返回 HTMLResponse；
+    其余文件返回 None 走原路。
+
+    注入顺序：AppBridge 无条件在前（所有页面可用），编辑脚本在后（维持 read_only 语义）。
+    read_only=True（分享访客）：编辑脚本先置 window.__hbteReadOnly——页面加载时照常套用已保存的
+    文字替换对，但编辑开关消息被忽略、改动也不会写回；AppBridge 不受 read_only 影响（访客照样
+    能读写行数据 / 订阅变更，sendToChat 在分享页无宿主监听会静默降级 no-channel）。"""
     if not file_path.lower().endswith((".html", ".htm")):
         return None
-    script = _load_edit_script()
-    if not script:
+    bridge = _load_bridge_script()
+    edit = _load_edit_script()
+    if not bridge and not edit:
         return None
     try:
         text = target.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
     # 注入的是裸 JS，必须包 <script> 标签才会执行；脚本内容本身不含 "</script>" 字样，直接拼安全
-    flag = "window.__hbteReadOnly = true;\n" if read_only else ""
-    tag = "<script>\n" + flag + script + "\n</script>"
+    tags: list[str] = []
+    if bridge:
+        tags.append("<script>\n" + bridge + "\n</script>")
+    if edit:
+        flag = "window.__hbteReadOnly = true;\n" if read_only else ""
+        tags.append("<script>\n" + flag + edit + "\n</script>")
+    block = "\n".join(tags)
     pos = text.lower().rfind("</body>")
-    injected = text[:pos] + "\n" + tag + "\n" + text[pos:] if pos != -1 else text + "\n" + tag
+    injected = text[:pos] + "\n" + block + "\n" + text[pos:] if pos != -1 else text + "\n" + block
     return HTMLResponse(injected, headers=_NO_STORE)
 
 
@@ -494,6 +523,8 @@ async def put_rows(token: str, body: HtmlAppRowsPut):
                 defaults={"data": item.data, "updated_by": actor_uid},
             )
     logger.info(f"[html_app] rows/put key={key} tbl={tbl} n={len(rows)} actor={actor_uid}")
+    # 行数据变更 → SSE 广播（by=page）：订阅该板的所有页面（板主 + 分享访客）onChange 刷新
+    app_events.publish(key, [tbl], "page")
     return Success(data={"written": len(rows)})
 
 
@@ -536,7 +567,53 @@ async def del_rows(token: str, body: HtmlAppRowsDel):
 
     deleted = await AgentAppRow.filter(workflow_key=key, tbl=tbl, row_key__in=keys).delete()
     logger.info(f"[html_app] rows/del key={key} tbl={tbl} n={deleted} actor={actor_uid}")
+    app_events.publish(key, [tbl], "page")
     return Success(data={"deleted": deleted})
+
+
+# ── SSE 行数据变更推送（token 门控）────────────────────────────────────────────
+# ⚠ 注册顺序红线：必须在下面的 catch-all serve_file（/{token}/{file_path:path}）之前，
+# 否则 /events 会被当成静态文件路径吞掉。EventSource 无法自定义请求头 → token 走 URL
+# （与页面所有请求同口径）；失败返回 PlainTextResponse 404，绝不碰 4001/4002/4003/4010 契约码。
+# 载荷最小化（不带行数据）：订阅者含匿名分享访客，行数据可能受 $acl readers 保护，
+# 页面收到事件后自行走 loadRows 正规读通道刷新（丢中间事件无害，幂等）。
+_SSE_HEARTBEAT_S = 20.0
+
+
+@router.get("/{token}/events", summary="订阅应用行数据变更（SSE，token 门控）")
+async def row_events(token: str):
+    claims = decode_html_app_token(token)
+    if claims is None:
+        return PlainTextResponse("链接无效或已过期", status_code=404)
+    wf_key = str(claims["workflowKey"])
+
+    q = app_events.subscribe(wf_key)
+    if q is None:
+        # 订阅配额打满（连接泄漏 / 恶意刷）：503 让 EventSource 走原生重连退避
+        return PlainTextResponse("订阅数已满，请稍后重试", status_code=503)
+
+    async def gen():
+        try:
+            # 首帧：立即发一个 hello 事件，页面据此确认通道就绪（也冲掉代理层的首包缓冲）
+            yield "event: hello\ndata: {}\n\n"
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=_SSE_HEARTBEAT_S)
+                    yield f"event: rows\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    # 心跳注释帧：防代理/浏览器判定连接空闲而断开
+                    yield ": ping\n\n"
+        except asyncio.CancelledError:
+            # 客户端断开（EventSource close / 页面卸载）：正常收尾，finally 清理订阅
+            raise
+        finally:
+            app_events.unsubscribe(wf_key, q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={**_NO_STORE, "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
 
 
 @router.get("/{token}/{file_path:path}", summary="托管应用制作静态文件（token 门控）")

@@ -13,6 +13,8 @@ withDefaults(
   defineProps<{
     /** 「今日简报」功能开关（默认关闭，由 index.vue 持久化到 localStorage） */
     briefEnabled: boolean;
+    /** 「流式时展开调用过程」偏好（DB 落库，由 index.vue 经 chat-mode 端点读写） */
+    toolProcessExpand: boolean;
   }>(),
   {}
 );
@@ -20,6 +22,7 @@ withDefaults(
 const emit = defineEmits<{
   openProfile: [];
   'update:briefEnabled': [value: boolean];
+  'update:toolProcessExpand': [value: boolean];
 }>();
 
 const authStore = useAuthStore();
@@ -37,6 +40,10 @@ function openProfile() {
 
 function toggleBrief(value: boolean) {
   emit('update:briefEnabled', value);
+}
+
+function toggleToolProcessExpand(value: boolean) {
+  emit('update:toolProcessExpand', value);
 }
 
 function logout() {
@@ -115,6 +122,15 @@ function logout() {
       <div class="qa-user-theme-seg">
         <button type="button" :class="{ on: qaTheme === 'glass' }" @click="setQaTheme('glass')">极光玻璃</button>
         <button type="button" :class="{ on: qaTheme === 'ink' }" @click="setQaTheme('ink')">墨简</button>
+      </div>
+
+      <!-- 过程展示偏好：流式输出时是否自动展开工具调用过程（DB 落库，默认关=一直收折） -->
+      <div class="qa-user-row qa-user-row--switch">
+        <span class="qa-user-row-label">
+          <SvgIcon icon="ph:list-bullets" class="qa-user-ico" />
+          <span>流式时展开调用过程</span>
+        </span>
+        <NSwitch size="small" :value="toolProcessExpand" @update:value="toggleToolProcessExpand" />
       </div>
 
       <div class="qa-user-divider" />

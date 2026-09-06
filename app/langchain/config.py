@@ -114,7 +114,8 @@ def _env_bool(key: str) -> Optional[bool]:
 # reasoning_effort 档位（OpenAI 风格的思考强度）。百炼网关的 qwen3.8-max / kimi-k3 /
 # deepseek-v4-pro / GLM 系等支持；none = 完全关思考（实测与 enable_thinking=false 等效，
 # reasoning_content 为空），其余 minimal/low/medium/high/max 逐级放开思考量
-#（max 为 kimi-k3 / GLM-5.3 系的最大力度档）。kimi-k3 例外：网关拒收 none（最低只到 minimal）。
+#（max 为 kimi-k3 / GLM-5.3 系的最大力度档）。例外仅百炼直供 kimi/kimi-k3（model 名
+# 精确匹配）：网关拒收 none（最低只到 minimal）；其它转发渠道的 kimi-k3 不受此限。
 _REASONING_EFFORT_LEVELS = frozenset({"none", "minimal", "low", "medium", "high", "max"})
 _THINKING_TRUE = frozenset({"1", "true", "yes", "on"})
 _THINKING_FALSE = frozenset({"0", "false", "no", "off"})

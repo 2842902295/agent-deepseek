@@ -31,6 +31,8 @@ const props = defineProps<{
   questions: QuestionnaireQuestion[];
   /** 历史回放：各题作答值（问题 id → 值，含「跳过」）；存在即视为已作答 */
   answers?: Record<string, string>;
+  /** 被绕过：用户没点问卷、直接输入内容回复了 → 置灰只读（不可再作答） */
+  ignored?: boolean;
   /** 会话流式进行中：禁止提交（后端同回合不可并发作答） */
   disabled?: boolean;
 }>();
@@ -69,6 +71,8 @@ onUnmounted(() => {
 const current = computed(() => props.questions[tab.value] ?? null);
 const isLast = computed(() => tab.value >= props.questions.length - 1);
 const readonlyMode = computed(() => submitted.value || !!props.answers);
+/** 不可交互态：只读回显 或 被绕过置灰（一切作答入口关闭） */
+const inertMode = computed(() => readonlyMode.value || !!props.ignored);
 
 function hasText(q: QuestionnaireQuestion): boolean {
   return (otherText[q.id] || '').trim() !== '';
@@ -98,9 +102,9 @@ function finalValue(q: QuestionnaireQuestion): string | null {
   return committed[q.id] ?? null;
 }
 
-// 每题都已处置（作答 或 显式跳过）才可提交——跳过也算数，保证全跳过也有出路
+// 每题都已处置（作答 或 显式跳过）才可提交——跳过也算数，保证全跳过也有出路；被绕过的问卷永不可提交
 const canSubmit = computed(
-  () => !submitted.value && !props.disabled && props.questions.length > 0 && props.questions.every(q => finalValue(q) !== null)
+  () => !submitted.value && !props.disabled && !props.ignored && props.questions.length > 0 && props.questions.every(q => finalValue(q) !== null)
 );
 
 /** 已选数（多选底栏左侧）：勾选项 + 自填文本（有字算一项） */
@@ -124,7 +128,7 @@ function armAutoSubmit() {
     clearTimeout(submitTimer);
     submitTimer = null;
   }
-  if (!isLast.value || readonlyMode.value || props.disabled || !canSubmit.value) return;
+  if (!isLast.value || inertMode.value || props.disabled || !canSubmit.value) return;
   if (current.value?.multiSelect) return; // 多选题走底栏 ↑ 显式提交，不自动
   if (current.value && typedAnswered[current.value.id]) return; // 自填答案不自动提交，交给用户点箭头
   submitTimer = setTimeout(() => {
@@ -174,7 +178,7 @@ function prev() {
 }
 
 function pickOption(q: QuestionnaireQuestion, label: string) {
-  if (readonlyMode.value || props.disabled) return;
+  if (inertMode.value || props.disabled) return;
   skipped[q.id] = false;
   typedAnswered[q.id] = false; // 点选覆盖自填
   if (q.multiSelect) {
@@ -214,7 +218,7 @@ function focusOtherInput(e: MouseEvent) {
 /** 跳过 = 视为已答并立即前进（单选多选一致，单向动作、无「恢复」态）：
  * 非末题切下一题；末题单选走停顿自动提交、多选直接提交（尚不可提交则仅落跳过态，用户可导航回其它题补齐） */
 function skipQuestion(q: QuestionnaireQuestion) {
-  if (readonlyMode.value || props.disabled) return;
+  if (inertMode.value || props.disabled) return;
   skipped[q.id] = true;
   typedAnswered[q.id] = false;
   picks[q.id] = [];
@@ -295,7 +299,7 @@ function displayValue(q: QuestionnaireQuestion): string {
       <!-- 载荷缺失（异常兜底：process 条目被清但占位符还在正文） -->
       <template v-if="!questions.length">
         <div class="qst-ro-head">
-          <span class="qst-ro-done"><svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d="M3 8.5l3.2 3.5L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
+          <span class="qst-ro-done"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3 8.5l3.2 3.5L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
           <span class="qst-ro-muted">问卷内容不可用</span>
         </div>
       </template>
@@ -304,13 +308,27 @@ function displayValue(q: QuestionnaireQuestion): string {
         <!-- 已作答（本地提交 或 历史回流）：只读回显实际答案 -->
         <template v-if="readonlyMode">
           <div class="qst-ro-head">
-            <span class="qst-ro-done"><svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d="M3 8.5l3.2 3.5L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
+            <span class="qst-ro-done"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3 8.5l3.2 3.5L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
             <span class="qst-ro-label">已作答</span>
           </div>
           <div class="qst-ro">
             <div v-for="q in questions" :key="q.id" class="qst-ro-line">
               <span class="qst-ro-title">{{ q.title }}</span>
               <span class="qst-ro-val" :class="{skip: displayValue(q) === '跳过'}">{{ displayValue(q) }}</span>
+            </div>
+          </div>
+        </template>
+
+        <!-- 被绕过（用户没点问卷、直接输入内容回复）：置灰只读，不可再作答 -->
+        <template v-else-if="ignored">
+          <div class="qst-ro-head">
+            <span class="qst-ign-icon"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.7" /><path d="M4 4l8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg></span>
+            <span class="qst-ign-label">未作答 · 已通过输入直接回复</span>
+          </div>
+          <div class="qst-ro qst-ign">
+            <div v-for="q in questions" :key="q.id" class="qst-ro-line">
+              <span class="qst-ro-title">{{ q.title }}</span>
+              <span class="qst-ro-val skip">未作答</span>
             </div>
           </div>
         </template>
@@ -326,11 +344,11 @@ function displayValue(q: QuestionnaireQuestion): string {
                 </div>
                 <div class="qst-nav">
                   <button type="button" class="qst-nav-btn" :disabled="tab === 0" aria-label="上一题" @click="prev">
-                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   </button>
                   <span class="qst-nav-count">{{ tab + 1 }}/{{ questions.length }}</span>
                   <button type="button" class="qst-nav-btn" :disabled="isLast" aria-label="下一题" @click="next">
-                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   </button>
                 </div>
               </div>
@@ -346,8 +364,8 @@ function displayValue(q: QuestionnaireQuestion): string {
                   @click="pickOption(current, opt.label)"
                 >
                   <span class="qst-opt-mark">
-                    <svg v-if="current.multiSelect && isPicked(current, opt.label)" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="currentColor" /><path d="M4.8 8.4l2.1 2.1 4.3-4.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                    <svg v-else-if="current.multiSelect" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+                    <svg v-if="current.multiSelect && isPicked(current, opt.label)" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="14" height="14" rx="3.5" fill="currentColor" /><path d="M4.8 8.4l2.1 2.1 4.3-4.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <svg v-else-if="current.multiSelect" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="14" height="14" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
                     <svg v-else-if="isPicked(current, opt.label)" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="8" cy="8" r="3.2" fill="currentColor" /></svg>
                     <svg v-else viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
                   </span>
@@ -364,8 +382,8 @@ function displayValue(q: QuestionnaireQuestion): string {
                   @click="focusOtherInput"
                 >
                   <span class="qst-opt-mark">
-                    <svg v-if="current.multiSelect && hasText(current)" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="currentColor" /><path d="M4.8 8.4l2.1 2.1 4.3-4.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                    <svg v-else-if="current.multiSelect" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+                    <svg v-if="current.multiSelect && hasText(current)" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="14" height="14" rx="3.5" fill="currentColor" /><path d="M4.8 8.4l2.1 2.1 4.3-4.8" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <svg v-else-if="current.multiSelect" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="14" height="14" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
                     <svg v-else-if="hasText(current)" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="8" cy="8" r="3.2" fill="currentColor" /></svg>
                     <svg v-else viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
                   </span>
@@ -389,8 +407,8 @@ function displayValue(q: QuestionnaireQuestion): string {
                       :aria-label="isLast ? '提交回答' : '下一题'"
                       @click="isLast ? handleSubmit() : next()"
                     >
-                      <svg v-if="isLast" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 13.5v-11M3.5 7L8 2.5 12.5 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                      <svg v-else viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 8h11M9 3.5L13.5 8 9 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                      <svg v-if="isLast" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 13.5v-11M3.5 7L8 2.5 12.5 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                      <svg v-else viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 8h11M9 3.5L13.5 8 9 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
                     </button>
                     <button
                       v-else
@@ -424,8 +442,8 @@ function displayValue(q: QuestionnaireQuestion): string {
                   :aria-label="isLast ? '提交回答' : '下一题'"
                   @click="isLast ? handleSubmit() : next()"
                 >
-                  <svg v-if="isLast" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 13.5v-11M3.5 7L8 2.5 12.5 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                  <svg v-else viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2.5 8h11M9 3.5L13.5 8 9 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  <svg v-if="isLast" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 13.5v-11M3.5 7L8 2.5 12.5 7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  <svg v-else viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 8h11M9 3.5L13.5 8 9 12.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
                 </button>
               </div>
             </div>
@@ -462,14 +480,14 @@ function displayValue(q: QuestionnaireQuestion): string {
 .qst-head {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 12px;
+  margin-bottom: 7px;
 }
 
 .qst-nav {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -478,10 +496,10 @@ function displayValue(q: QuestionnaireQuestion): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border: 1px solid var(--rule);
-  border-radius: 7px;
+  border-radius: 7.5px;
   background: rgba(255, 255, 255, 0.5);
   color: var(--ink-3);
   cursor: pointer;
@@ -500,36 +518,36 @@ function displayValue(q: QuestionnaireQuestion): string {
 
 .qst-nav-count {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--ink-4);
-  min-width: 26px;
+  min-width: 30px;
   text-align: center;
 }
 
 /* ── 题目区 ──────────────────────────────────────── */
 .qst-body {
-  padding: 10px 12px 12px;
+  padding: 13px 16px 15px;
 }
 
 .qst-question {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
   color: var(--ink);
   line-height: 1.6;
 }
 
 .qst-multi-hint {
   display: inline-block;
-  margin-left: 6px;
-  font-size: 10px;
+  margin-left: 7px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--ink-4);
   border: 1px solid var(--rule);
   border-radius: 99px;
-  padding: 0 7px;
-  vertical-align: 1px;
+  padding: 0 8px;
+  vertical-align: 2px;
 }
 
 /* 选项列表：轻量风格——不逐项描边，行间一条分隔线 */
@@ -541,13 +559,13 @@ function displayValue(q: QuestionnaireQuestion): string {
 .qst-opt {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 11px;
   text-align: left;
   border: none;
   border-bottom: 1px solid var(--rule);
   border-radius: 0;
   background: transparent;
-  padding: 9px 6px;
+  padding: 10px 6px;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -597,18 +615,18 @@ function displayValue(q: QuestionnaireQuestion): string {
 .qst-opt-text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
 }
 
 .qst-opt-label {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
   line-height: 1.5;
 }
 
 .qst-opt-desc {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--ink-4);
   line-height: 1.5;
 }
@@ -628,7 +646,7 @@ function displayValue(q: QuestionnaireQuestion): string {
   min-width: 0;
   border: none;
   background: transparent;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
   outline: none;
   padding: 0;
@@ -647,12 +665,12 @@ function displayValue(q: QuestionnaireQuestion): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 12px;
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: 9px;
   background: #fff;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink-3);
   cursor: pointer;
   flex-shrink: 0;
@@ -674,15 +692,15 @@ function displayValue(q: QuestionnaireQuestion): string {
 .qst-foot {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   margin-top: 4px;
-  padding-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--rule);
 }
 
 .qst-count {
   flex: 1;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink-4);
 }
 
@@ -690,10 +708,10 @@ function displayValue(q: QuestionnaireQuestion): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 8px;
+  border-radius: 9px;
   background: var(--accent);
   color: #fff;
   cursor: pointer;
@@ -714,23 +732,23 @@ function displayValue(q: QuestionnaireQuestion): string {
 .qst-ro-head {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 9px 12px 0;
+  gap: 8px;
+  padding: 11px 16px 0;
 }
 
 .qst-ro-done {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
   border-radius: 99px;
   background: rgba(42, 157, 143, 0.14);
   color: #2a9d8f;
 }
 
 .qst-ro-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: #2a9d8f;
   letter-spacing: 0.04em;
@@ -742,17 +760,17 @@ function displayValue(q: QuestionnaireQuestion): string {
 }
 
 .qst-ro {
-  padding: 8px 12px 12px;
+  padding: 8px 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .qst-ro-line {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  font-size: 12px;
+  gap: 9px;
+  font-size: 12.5px;
   line-height: 1.6;
 }
 
@@ -763,7 +781,7 @@ function displayValue(q: QuestionnaireQuestion): string {
 
 .qst-ro-title::after {
   content: '·';
-  margin-left: 8px;
+  margin-left: 9px;
   color: var(--rule);
 }
 
@@ -774,6 +792,30 @@ function displayValue(q: QuestionnaireQuestion): string {
 
 .qst-ro-val.skip {
   color: var(--ink-4);
+}
+
+/* ── 被绕过置灰态：整体去色，只读展示「未作答」 ─────── */
+.qst-ign-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 99px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--ink-4);
+}
+
+.qst-ign-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-4);
+  letter-spacing: 0.04em;
+}
+
+.qst-ign .qst-ro-title,
+.qst-ign .qst-ro-val {
+  opacity: 0.75;
 }
 
 /* ── 切题过渡 ───────────────────────────────────── */

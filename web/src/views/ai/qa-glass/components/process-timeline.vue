@@ -4,14 +4,15 @@ import type { ProcessStep } from '@/service/api/ai';
 import { argsSummary, argsToParams, parseResultContent, resultSummary } from '../modules/tool-format';
 
 /**
- * 过程时间线（dsh 三段式改造：过程时间线 + 结果 两段式）
+ * 过程时间线（新输出模式：方向 C 胶囊 + 无框虚线时间线）
  *
  * 渲染后端 process_json / SSE process 事件累积的条目序列：
  * reasoning 思考 / text 叙述 / tool_call + tool_result 工具卡 / todo 清单 / compaction 压缩。
- * 折叠态为一行摘要（「过程 · N 次调用 · …」），展开态为带竖线节点的时间线。
+ * 折叠态为一枚圆角胶囊（节点分支图标 + 统计 + 工具名摘要），展开态为无外框的虚线节点时间线；
+ * 流式进行中（live）胶囊图标换成旋转圆弧，回合结束即恢复静态图标（样张 qa-flow-preview.html C2）。
  *
  * 折叠由父组件通过 v-model:collapsed 控制：
- * - 流式中强制展开（live=true 时摘要行仍可点，但父组件会在 done 时自动收起）
+ * - 流式中强制展开（live=true 时胶囊仍可点，但父组件会在 done 时自动收起）
  * - aborted/error 回合默认展开
  */
 const props = defineProps<{
@@ -65,7 +66,7 @@ const stats = computed(() => {
     toolCount: calls.length,
     subagentCount: calls.filter(i => i.is_subagent).length,
     textCount: visibleItems.value.filter(i => i.kind === 'text').length,
-    hasReasoning: visibleItems.value.some(i => i.kind === 'reasoning'),
+    reasoningCount: visibleItems.value.filter(i => i.kind === 'reasoning').length,
     hasTodo: visibleItems.value.some(i => i.kind === 'todo')
   };
 });
@@ -85,8 +86,39 @@ const summaryText = computed(() => {
     if (stats.value.subagentCount) parts.push(`${stats.value.subagentCount} 子代理`);
   }
   if (stats.value.textCount) parts.push(`${stats.value.textCount} 段叙述`);
-  if (stats.value.hasReasoning) parts.push('含思考');
+  // 「含思考」只作工具调用的补充说明；组内没有调用时单独说「N 段思考」，避免孤零零的「含思考」
+  if (stats.value.reasoningCount) {
+    parts.push(stats.value.toolCount ? '含思考' : `${stats.value.reasoningCount} 段思考`);
+  }
   if (props.durationMs && props.durationMs > 0) parts.push(formatDuration(props.durationMs));
+  return parts.join(' · ');
+});
+
+/** 胶囊主文案：live = 当前活动（思考中/进行中）+ 调用计数；结束 = 统计摘要（无工具时兜底「过程」） */
+const pillText = computed(() => {
+  if (props.live) {
+    const items = visibleItems.value;
+    const last = items[items.length - 1];
+    // 尾部条目是思考且正文未在流式（openTextId 有值 = 正在写答案而非思考）→「思考中」提示，
+    // 与「已 N 次调用」同口径：折叠态也能看出 agent 当前在干什么
+    const thinking = !!last && last.kind === 'reasoning' && !props.openTextId;
+    const act = thinking ? '思考中' : '进行中';
+    return stats.value.toolCount ? `${act} · 已 ${stats.value.toolCount} 次调用` : act;
+  }
+  return summaryText.value || '过程';
+});
+
+/** 胶囊灰字摘要：被调用的工具显示名（同名合并 ×N），超长由 CSS 截断 */
+const dimText = computed(() => {
+  const counts = new Map<string, number>();
+  for (const i of visibleItems.value) {
+    if (i.kind !== 'tool_call') continue;
+    const n = i.tool_display || i.tool;
+    if (!n) continue;
+    counts.set(n, (counts.get(n) || 0) + 1);
+  }
+  const parts: string[] = [];
+  counts.forEach((c, n) => parts.push(c > 1 ? `${n} ×${c}` : n));
   return parts.join(' · ');
 });
 
@@ -106,258 +138,235 @@ function todoIcon(status: string): string {
 
 <template>
   <div class="ptl">
-    <div class="ptl-box">
-      <!-- 摘要行（折叠态唯一可见部分） -->
-      <div
-        class="ptl-summary"
-        role="button"
-        tabindex="0"
-        @click="innerCollapsed = !innerCollapsed"
-        @keydown.enter.prevent="innerCollapsed = !innerCollapsed"
-      >
-        <span class="ptl-icon" :class="{ live }">⌬</span>
-        <span class="ptl-label">{{ innerCollapsed ? '过程' : '过程时间线' }}</span>
-        <span v-if="live" class="ptl-live">进行中</span>
-        <span v-if="summaryText" class="ptl-stats">{{ summaryText }}</span>
-        <span class="ptl-toggle">{{ innerCollapsed ? '展开' : '收起' }}<i>{{ innerCollapsed ? '↓' : '↑' }}</i></span>
-      </div>
-
-      <!-- 时间线主体 -->
-      <ol v-if="!innerCollapsed" class="ptl-list">
-        <li v-for="item in visibleItems" :key="item.id" :class="[`ptl-${item.kind}`, { 'ptl-sub': item.in_subagent }]" class="ptl-item">
-          <span class="ptl-node" />
-
-          <!-- reasoning：淡色斜体纯文本（不走 marked） -->
-          <template v-if="item.kind === 'reasoning'">
-            <div class="ptl-body">
-              <div class="ptl-head-row">
-                <span class="ptl-tag tag-reasoning">思考</span>
-              </div>
-              <div class="ptl-reasoning">{{ item.content }}</div>
-            </div>
-          </template>
-
-          <!-- text：叙述（被后续工具调用定性为中间话语，留时间线不进答案） -->
-          <template v-else-if="item.kind === 'text'">
-            <div class="ptl-body">
-              <div class="ptl-head-row">
-                <span class="ptl-tag tag-text">叙述</span>
-              </div>
-              <div class="ptl-narration">{{ item.content }}</div>
-            </div>
-          </template>
-
-          <!-- tool_call：工具调用卡 -->
-          <template v-else-if="item.kind === 'tool_call'">
-            <div class="ptl-body">
-              <div class="ptl-head-row" @click="toggleItem(item.id)">
-                <span class="ptl-tag tag-call">调用</span>
-                <span v-if="item.is_subagent && !item.in_subagent" class="ptl-sub-badge">子代理</span>
-                <span v-else-if="item.in_subagent" class="ptl-sub-badge ptl-sub-badge--child">子代理内</span>
-                <span class="ptl-tool">{{ item.tool_display || item.tool }}</span>
-                <span class="ptl-arrow">{{ expanded[item.id] ? '▴' : '▾' }}</span>
-              </div>
-              <div v-if="!expanded[item.id]" class="ptl-summary-line">
-                {{ item.is_subagent && subagentDesc(item) ? subagentDesc(item) : argsSummary(item.args || {}) }}
-              </div>
-              <div v-else class="ptl-detail ptl-detail-call">
-                <template v-if="argsToParams(item.args || {}).length">
-                  <div v-for="p in argsToParams(item.args || {})" :key="p.key" class="ptl-param-row">
-                    <span class="ptl-param-key">{{ p.key }}</span>
-                    <span class="ptl-param-val">{{ p.value }}</span>
-                  </div>
-                </template>
-                <div v-else class="ptl-plain-text">(无参数)</div>
-              </div>
-            </div>
-          </template>
-
-          <!-- tool_result：工具返回卡（is_error 红描边） -->
-          <template v-else-if="item.kind === 'tool_result'">
-            <div class="ptl-body">
-              <div class="ptl-head-row" @click="toggleItem(item.id)">
-                <span class="ptl-tag tag-result">{{ item.is_error ? '失败' : '返回' }}</span>
-                <span v-if="item.in_subagent" class="ptl-sub-badge ptl-sub-badge--child">子代理内</span>
-                <span class="ptl-tool">{{ item.tool_display || item.tool }}</span>
-                <span class="ptl-arrow">{{ expanded[item.id] ? '▴' : '▾' }}</span>
-              </div>
-              <div v-if="!expanded[item.id]" class="ptl-summary-line">{{ resultSummary(item.content ?? '') }}</div>
-              <div v-else class="ptl-detail" :class="item.is_error ? 'ptl-detail-error' : 'ptl-detail-result'">
-                <template v-if="parseResultContent(item.content || '').kind === 'kv'">
-                  <div
-                    v-for="p in (parseResultContent(item.content || '') as any).pairs"
-                    :key="p.key"
-                    class="ptl-param-row ptl-result-row"
-                  >
-                    <span class="ptl-param-key ptl-result-key">{{ p.key }}</span>
-                    <span class="ptl-param-val">{{ p.value }}</span>
-                  </div>
-                </template>
-                <template v-else-if="parseResultContent(item.content || '').kind === 'list'">
-                  <div
-                    v-for="li in (parseResultContent(item.content || '') as any).items"
-                    :key="li.label"
-                    class="ptl-list-item"
-                  >
-                    <span class="ptl-list-seq">{{ li.label }}</span>
-                    <span class="ptl-list-line">{{ li.line }}</span>
-                  </div>
-                </template>
-                <div v-else class="ptl-plain-text">{{ (parseResultContent(item.content || '') as any).value }}</div>
-              </div>
-            </div>
-          </template>
-
-          <!-- todo：任务清单（整快照原位替换） -->
-          <template v-else-if="item.kind === 'todo'">
-            <div class="ptl-body">
-              <div class="ptl-head-row">
-                <span class="ptl-tag tag-todo">清单</span>
-              </div>
-              <div class="ptl-todos">
-                <div
-                  v-for="(t, ti) in item.todos || []"
-                  :key="ti"
-                  class="ptl-todo-row"
-                  :class="`todo-${t.status}`"
-                >
-                  <span class="ptl-todo-icon">{{ todoIcon(t.status) }}</span>
-                  <span class="ptl-todo-text">{{ t.content }}</span>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- compaction：上下文压缩一行灰字 -->
-          <template v-else-if="item.kind === 'compaction'">
-            <div class="ptl-body">
-              <div class="ptl-compaction">上下文压缩（历史过长，运行时自动整理）</div>
-            </div>
-          </template>
-        </li>
-      </ol>
+    <!-- 胶囊摘要行（折叠态唯一可见部分） -->
+    <div
+      class="ptl-pill"
+      :class="{ live }"
+      role="button"
+      tabindex="0"
+      @click="innerCollapsed = !innerCollapsed"
+      @keydown.enter.prevent="innerCollapsed = !innerCollapsed"
+    >
+      <!-- live：旋转圆弧（明确的「进行中」语义）；结束：静态节点分支图标 -->
+      <svg v-if="live" class="ptl-pill-ico ptl-spin" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="26 12" /></svg>
+      <svg v-else class="ptl-pill-ico" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="3.2" cy="8" r="1.9" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="12.8" cy="3.6" r="1.7" fill="currentColor" /><circle cx="12.8" cy="12.4" r="1.7" fill="currentColor" opacity="0.5" /><path d="M5.1 8h3.2c1 0 1.4-.5 1.9-1.4l.9-1.6M8.3 8h3.2c1 0 1.4.5 1.9 1.4l.9 1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+      <span class="ptl-pill-txt">{{ pillText }}</span>
+      <span v-if="dimText" class="ptl-pill-dim">{{ dimText }}</span>
+      <svg class="ptl-chev" :class="{ open: !innerCollapsed }" viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="M3.5 6L8 10.5 12.5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </div>
+
+    <!-- 时间线主体（无外框：左侧虚线 + 节点，条目二级展开沿用原交互） -->
+    <ol v-if="!innerCollapsed" class="ptl-list">
+      <li v-for="item in visibleItems" :key="item.id" :class="[`ptl-${item.kind}`, { 'ptl-sub': item.in_subagent }]" class="ptl-item">
+        <span class="ptl-node" />
+
+        <!-- reasoning：淡色斜体纯文本（不走 marked） -->
+        <template v-if="item.kind === 'reasoning'">
+          <div class="ptl-body">
+            <div class="ptl-head-row">
+              <span class="ptl-tag tag-reasoning">思考</span>
+            </div>
+            <div class="ptl-reasoning-text">{{ item.content }}</div>
+          </div>
+        </template>
+
+        <!-- text：叙述（新输出模式下叙述已平铺进正文流，组内出现属兜底） -->
+        <template v-else-if="item.kind === 'text'">
+          <div class="ptl-body">
+            <div class="ptl-head-row">
+              <span class="ptl-tag tag-text">叙述</span>
+            </div>
+            <div class="ptl-narration">{{ item.content }}</div>
+          </div>
+        </template>
+
+        <!-- tool_call：工具调用卡 -->
+        <template v-else-if="item.kind === 'tool_call'">
+          <div class="ptl-body">
+            <div class="ptl-head-row" @click="toggleItem(item.id)">
+              <span class="ptl-tag tag-call">调用</span>
+              <span v-if="item.is_subagent && !item.in_subagent" class="ptl-sub-badge">子代理</span>
+              <span v-else-if="item.in_subagent" class="ptl-sub-badge ptl-sub-badge--child">子代理内</span>
+              <span class="ptl-tool">{{ item.tool_display || item.tool }}</span>
+              <span class="ptl-arrow">{{ expanded[item.id] ? '▴' : '▾' }}</span>
+            </div>
+            <div v-if="!expanded[item.id]" class="ptl-summary-line">
+              {{ item.is_subagent && subagentDesc(item) ? subagentDesc(item) : argsSummary(item.args || {}) }}
+            </div>
+            <div v-else class="ptl-detail ptl-detail-call">
+              <template v-if="argsToParams(item.args || {}).length">
+                <div v-for="p in argsToParams(item.args || {})" :key="p.key" class="ptl-param-row">
+                  <span class="ptl-param-key">{{ p.key }}</span>
+                  <span class="ptl-param-val">{{ p.value }}</span>
+                </div>
+              </template>
+              <div v-else class="ptl-plain-text">(无参数)</div>
+            </div>
+          </div>
+        </template>
+
+        <!-- tool_result：工具返回卡（is_error 红描边） -->
+        <template v-else-if="item.kind === 'tool_result'">
+          <div class="ptl-body">
+            <div class="ptl-head-row" @click="toggleItem(item.id)">
+              <span class="ptl-tag tag-result">{{ item.is_error ? '失败' : '返回' }}</span>
+              <span v-if="item.in_subagent" class="ptl-sub-badge ptl-sub-badge--child">子代理内</span>
+              <span class="ptl-tool">{{ item.tool_display || item.tool }}</span>
+              <span class="ptl-arrow">{{ expanded[item.id] ? '▴' : '▾' }}</span>
+            </div>
+            <div v-if="!expanded[item.id]" class="ptl-summary-line">{{ resultSummary(item.content ?? '') }}</div>
+            <div v-else class="ptl-detail" :class="item.is_error ? 'ptl-detail-error' : 'ptl-detail-result'">
+              <template v-if="parseResultContent(item.content || '').kind === 'kv'">
+                <div
+                  v-for="p in (parseResultContent(item.content || '') as any).pairs"
+                  :key="p.key"
+                  class="ptl-param-row ptl-result-row"
+                >
+                  <span class="ptl-param-key ptl-result-key">{{ p.key }}</span>
+                  <span class="ptl-param-val">{{ p.value }}</span>
+                </div>
+              </template>
+              <template v-else-if="parseResultContent(item.content || '').kind === 'list'">
+                <div
+                  v-for="li in (parseResultContent(item.content || '') as any).items"
+                  :key="li.label"
+                  class="ptl-list-item"
+                >
+                  <span class="ptl-list-seq">{{ li.label }}</span>
+                  <span class="ptl-list-line">{{ li.line }}</span>
+                </div>
+              </template>
+              <div v-else class="ptl-plain-text">{{ (parseResultContent(item.content || '') as any).value }}</div>
+            </div>
+          </div>
+        </template>
+
+        <!-- todo：任务清单（整快照原位替换） -->
+        <template v-else-if="item.kind === 'todo'">
+          <div class="ptl-body">
+            <div class="ptl-head-row">
+              <span class="ptl-tag tag-todo">清单</span>
+            </div>
+            <div class="ptl-todos">
+              <div
+                v-for="(t, ti) in item.todos || []"
+                :key="ti"
+                class="ptl-todo-row"
+                :class="`todo-${t.status}`"
+              >
+                <span class="ptl-todo-icon">{{ todoIcon(t.status) }}</span>
+                <span class="ptl-todo-text">{{ t.content }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- compaction：上下文压缩一行灰字 -->
+        <template v-else-if="item.kind === 'compaction'">
+          <div class="ptl-body">
+            <div class="ptl-compaction">上下文压缩（历史过长，运行时自动整理）</div>
+          </div>
+        </template>
+      </li>
+    </ol>
   </div>
 </template>
 
 <style scoped>
+/* 根：胶囊 + 时间线纵向排列，间距即样张 gap 4px（与 flow-col 的 14px gap 叠加） */
 .ptl {
-  margin: 10px 0 6px;
-}
-
-.ptl-box {
-  border: 1px solid rgba(30, 64, 175, 0.1);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.42);
-  backdrop-filter: blur(20px) saturate(180%);
-  overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-}
-
-.ptl-summary {
+  margin: 0;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 14px;
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  user-select: none;
-  transition: all 0.15s;
-  background: linear-gradient(90deg, var(--accent-soft) 0%, transparent 70%);
+  flex-direction: column;
+  gap: 4px;
 }
 
-.ptl-summary:hover {
-  color: var(--ink);
-  background: linear-gradient(90deg, rgba(30, 64, 175, 0.1) 0%, transparent 70%);
-}
-
-.ptl-icon {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1.5px solid var(--accent);
+/* ── 胶囊摘要行（样张 .tg-c-pill 逐值） ─────────────────────── */
+.ptl-pill {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  color: var(--accent);
-  flex-shrink: 0;
-  background: var(--accent-soft);
-}
-
-.ptl-icon.live {
-  animation: ptl-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes ptl-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(30, 64, 175, 0.25);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(30, 64, 175, 0.08);
-  }
-}
-
-.ptl-label {
-  font-weight: 600;
-}
-
-.ptl-live {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid rgba(30, 64, 175, 0.18);
-  padding: 1px 7px;
+  gap: 8px;
+  max-width: 100%;
+  border: 1px solid var(--rule);
   border-radius: 99px;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 5px 14px 5px 11px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-.ptl-stats {
-  flex: 1;
-  font-size: 10px;
-  color: var(--ink-4);
+.ptl-pill:hover {
+  border-color: rgba(30, 64, 175, 0.3);
+  box-shadow: 0 2px 10px rgba(30, 64, 175, 0.08);
+}
+
+.ptl-pill-ico {
+  display: block;
+  flex-shrink: 0;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.ptl-pill.live .ptl-pill-ico {
+  opacity: 1;
+}
+
+/* live 旋转圆弧：只在进行中出现，回合结束换回静态图标 */
+.ptl-spin {
+  animation: ptl-rot 0.9s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes ptl-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ptl-pill-txt {
+  font-weight: 600;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ptl-pill-dim {
+  color: var(--ink-4);
+  font-size: 11.5px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ptl-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--ink-4);
-  font-size: 9px;
-  letter-spacing: 0.1em;
+.ptl-chev {
+  margin-left: auto;
   flex-shrink: 0;
+  color: var(--ink-4);
+  transition: transform 0.18s;
 }
 
-.ptl-toggle i {
-  font-style: normal;
-  display: inline-block;
+.ptl-chev.open {
+  transform: rotate(180deg);
 }
 
+/* ── 时间线主体（样张 .tg-c-list：无外框，左侧虚线 + 节点） ──── */
 .ptl-list {
   list-style: none;
-  padding: 6px 0;
-  margin: 0;
   position: relative;
-  border-top: 1px solid var(--rule);
+  margin: 0 0 0 12px;
+  padding: 0 0 0 20px;
 }
 
 .ptl-list::before {
   content: '';
   position: absolute;
-  left: 32px;
-  top: 18px;
-  bottom: 18px;
+  left: 3.5px;
+  top: 8px;
+  bottom: 8px;
   width: 1px;
   background: repeating-linear-gradient(to bottom, var(--rule) 0 5px, transparent 5px 9px);
 }
@@ -365,22 +374,19 @@ function todoIcon(status: string): string {
 .ptl-item {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 7px 14px 7px 18px;
-  transition: background 0.1s;
+  gap: 9px;
+  padding: 5px 0;
   position: relative;
 }
 
-.ptl-item:hover {
-  background: rgba(30, 64, 175, 0.025);
-}
-
+/* 节点骑在虚线上：负外边距把圆点拉回线位（列表 padding-left 20px，线在 3.5px） */
 .ptl-node {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 4px;
+  margin-top: 6px;
+  margin-left: -20px;
   position: relative;
   z-index: 1;
   background: var(--ink-4);
@@ -481,24 +487,25 @@ function todoIcon(status: string): string {
   background: #64748b;
 }
 
-/* 子代理子会话条目：整体缩进，表达「嵌套在委派之内」的层级 */
+/* 子代理子会话条目：整体缩进（样张 .tg-c-item.sub 18px），节点缩小脱离主线 */
 .ptl-item.ptl-sub {
-  margin-left: 26px;
+  margin-left: 18px;
 }
 
 .ptl-item.ptl-sub .ptl-node {
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  margin-left: -18px;
   background: #64748b;
-  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.12);
+  box-shadow: none;
 }
 
 .ptl-tool {
   flex: 1;
   color: var(--ink);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -512,7 +519,7 @@ function todoIcon(status: string): string {
 
 .ptl-summary-line {
   font-family: var(--font-body);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-3);
   line-height: 1.5;
   white-space: nowrap;
@@ -626,8 +633,8 @@ function todoIcon(status: string): string {
   background: var(--paper);
 }
 
-/* reasoning：淡色斜体纯文本 */
-.ptl-reasoning {
+/* reasoning：淡色斜体纯文本（类名与 <li> 的 ptl-reasoning 区分，避免 overflow 命中 li 裁掉负边距节点） */
+.ptl-reasoning-text {
   font-family: var(--font-body);
   font-size: 11.5px;
   font-style: italic;

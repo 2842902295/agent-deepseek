@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     JGH_PDF_APP_ID: str = ""
     # 标准文档图片基础 URL（jgh-bag 表格/公式图片前缀，MinerU 解析、Agent 读图、定时回填共用，需以 / 结尾）
     JGH_IMAGE_BASE_URL: str = "http://127.0.0.1:48888/admin-api/standard/jgh-bag/image/"
+    # 图片公网镜像前缀（内网网关 5xx/不可达时的候选地址，按 file_name 拼接，需以 / 结尾；留空则不启用该候选）
+    JGH_IMAGE_PUBLIC_BASE_URL: str = "https://www.miitstdps.cn/admin-api/standard/jgh-bag/image/"
+    # 图片旧站 host（image 字段为站内相对路径 /oss/... 时的兜底候选；留空则不启用）
+    JGH_IMAGE_LEGACY_HOST: str = "http://dzsy.iyunwen.com"
 
     # 服务启动时是否自动续跑未完成的查重批次（false 时由前端手动触发 /batch-resume）
     AUTO_RESUME_DEDUP_BATCH: bool = True

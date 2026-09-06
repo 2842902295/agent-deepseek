@@ -107,9 +107,10 @@ _SEED_PRESETS: list[dict[str, Any]] = [
         "vision_supported": True,
         "thinking": None,
         "context_window": None,
-        # kimi-k3（阿里云直供）始终开启思考：档位无 none，默认落最低档 low
-        # （reasoning_default 留空 = 默认不开规则下 none 优先、无 none 取最低）
-        "reasoning_levels": "low,high,max",
+        # 档位含 none（默认档 = 关闭思考）。仅当 model 名精确等于 kimi/kimi-k3（百炼直供，
+        # 网关拒收 none）时代理翻译层才兜底 none→minimal；官方转发等其它渠道的
+        # kimi-k3 直接透传 none 真关思考（2026-09-06 用户确认口径）
+        "reasoning_levels": "none,low,high,max",
         "reasoning_default": None,
         "sort_order": 3,
     },

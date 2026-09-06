@@ -1023,9 +1023,13 @@ async def update_workflow(
 
     payload = body.model_dump(exclude_unset=True, by_alias=False)
     human_edit = payload.pop("human_edit", None)
-    if payload or human_edit is not None:
-        if payload:
-            await wf.update_from_dict(payload).save()
+    # 同值字段不算改动：前端 html 板曾在回合冲刷保存时误发相同 title 的 PUT，无条件 bump
+    # version 会让画布轮询命中「新版本」→ iframe 假重载 /「新版本已就绪」条莫名冒出。
+    # 只有实际值发生变化的字段才写库并递增版本（human_edit 非 None = 有改动上报，照旧计入）。
+    changed = {k: v for k, v in payload.items() if getattr(wf, k, None) != v}
+    if changed or human_edit is not None:
+        if changed:
+            await wf.update_from_dict(changed).save()
         wf.editor = "human"
         if human_edit is not None:
             wf.human_edit = human_edit

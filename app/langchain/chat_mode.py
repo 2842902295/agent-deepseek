@@ -16,11 +16,13 @@
 读时经 LEGACY_LEVEL_MAP 翻译。运行期档位编码进 llm 回环代理 URL 路径段
 （/llm-proxy/{block}/{level}，见 llm_proxy.py，按块 levels 白名单校验），由代理
 在 wire 上按 provider 翻译注入（_build_thinking_extra_body：qwen/deepseek/GLM
-透传 reasoning_effort、kimi none→minimal 地板、binary 协议 provider 降级为开/关）。
+透传 reasoning_effort、百炼直供 kimi/kimi-k3（model 名精确匹配）none→minimal 地板、
+binary 协议 provider 降级为开/关）。
 
 **默认与迁移规则**：
 - 默认不开：块 reasoning_default 显式配置（且 ∈ levels）优先；否则 levels 含
-  none → none，再否则最低档（kimi 恒开思考 → low）。
+  none → none，再否则最低档。levels 里配 none 不要求上游真收 none——代理翻译层
+  会把 none 落到该 provider 可用的最低档（如百炼直供 kimi/kimi-k3 的 none→minimal）。
 - 平滑迁移：已存档位 ∉ 当前有效块 levels 时（切模式/切模型/legacy），不回退
   默认，按序数 none<low<medium<high<max 就近映射到相邻档位（平手取低档，
   费用保守）；存量值不改写，切回原块自动还原。
@@ -55,7 +57,7 @@ LEVEL_LABELS: dict[str, str] = {"none": "关闭", "low": "轻度", "medium": "�
 # 存量 legacy 语义 token → wire 值（旧三档方案 pref 里存的值，读时翻译后走平滑迁移）
 LEGACY_LEVEL_MAP: dict[str, str] = {"standard": "none", "advanced": "medium", "ultimate": "high"}
 
-# 平滑迁移序数（minimal 是 kimi 翻译层地板值，与 low 同序，仅当块显式配置它时参与）
+# 平滑迁移序数（minimal 是百炼直供 kimi/kimi-k3 翻译层地板值，与 low 同序，仅当块显式配置它时参与）
 _LEVEL_ORD: dict[str, int] = {"none": 0, "minimal": 1, "low": 1, "medium": 2, "high": 3, "max": 4}
 
 # 播种基线（mode, label, note, sort_order）：仅新装库（表为空）首启插入；
@@ -146,8 +148,8 @@ def block_default_level(block_key: Optional[str]) -> Optional[str]:
 def migrate_level(level: str, levels: list[str]) -> Optional[str]:
     """平滑迁移：把档位按序数就近映射进块 levels 白名单（平手取低档，费用保守）。
 
-    例：medium → kimi{low,high,max} 落 low；none → kimi 落 low；
-    medium → deepseekpro{high,max} 落 high。levels 空或档位不可识别 → None。
+    例：medium → {low,high,max} 落 low；none → {low,high,max} 落 low；
+    medium → {high,max} 落 high。levels 空或档位不可识别 → None。
     """
     if not levels or level not in _LEVEL_ORD:
         return None

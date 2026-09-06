@@ -134,7 +134,34 @@ _TOOL_DISPLAY_MAP = {
     "create_scheduled_task": "创建定时任务",
     "list_scheduled_tasks": "查看定时任务",
     "delete_scheduled_task": "删除定时任务",
+    # ── 应用制作行数据（agent 侧通用读写工具，互动接口 mcp__app_* 另有动态映射见下）──
+    "query_app_rows": "读取应用数据",
+    "update_app_rows": "写入应用数据",
 }
+
+
+def _lookup_app_display_name(tool_name: str) -> "str | None":
+    """应用制作「互动接口」工具（mcp__app_{wk}__{name}）的动态中文显示名。
+
+    manifest 里每个工具可声明 displayName（中文），桥 list_tools 时登记进
+    app_board_bridge._DISPLAY_NAMES（wk → {tool: displayName}）。时间线展示时按
+    (wk, 工具名) 查这张表——静态映射表不可能预知各应用自定义的工具名。
+    延迟导入防循环 + try/except 兜底：查不到（未登记 / 桥未加载）返回 None，回落静态表 / 裸名。
+    """
+    try:
+        parts = tool_name.split("__", 2)
+        if len(parts) != 3 or not parts[1].startswith("app_"):
+            return None
+        wk = parts[1][len("app_") :]
+        name = parts[2]
+        if not wk or not name:
+            return None
+        from app.mcp_bridge import app_board_bridge
+
+        return app_board_bridge._DISPLAY_NAMES.get(wk, {}).get(name)
+    except Exception:  # noqa: BLE001 —— 显示名是锦上添花，任何异常都不该影响时间线
+        return None
+
 
 
 def strip_tool_prefix(tool_name: str) -> str:
@@ -142,7 +169,7 @@ def strip_tool_prefix(tool_name: str) -> str:
     剥掉 MCP 传输前缀，返回工具基础名。
 
     dsh 阶段经 MCP 桥挂载的工具带传输前缀（mcp__stdtools__X / mcp__websearch__X /
-    mcp__dataset_meta__X / mcp__conn_<key>__X），剥掉前两段得到原始工具名。
+    mcp__dataset_meta__X / mcp__conn_<key>__X / mcp__app_<wk>__X），剥掉前两段得到原始工具名。
     """
     if not tool_name:
         return tool_name
@@ -166,4 +193,10 @@ def get_tool_display_name(tool_name: str) -> str:
     """
     if not tool_name:
         return tool_name
+    # 应用制作互动接口工具：优先 manifest 登记的 displayName（按 wk 级动态查桥注册表）
+    if tool_name.startswith("mcp__app_"):
+        dn = _lookup_app_display_name(tool_name)
+        if dn:
+            return dn
     return _TOOL_DISPLAY_MAP.get(strip_tool_prefix(tool_name), tool_name)
+

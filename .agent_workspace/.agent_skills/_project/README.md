@@ -105,4 +105,5 @@ def make_tools(ctx):
 |---|---|
 | `sediment` | 沉淀对话入知识库 / 凝练为可复用 capability |
 | `workflow-board` | 工作流画板板型方法论：板型判断 / 骨架模板 / 归属决策 / 流水账自检与重构 / 人工核査收口协议 / AI 重整流程 |
+| `html-app-studio` | 应用制作（html 看板）开发全方法论（HTML_BOARD_RULES 拆分而来，注入侧只留薄规则）：三类交付物判定 / 2026 现代风格强制规范与过时风格负面清单 / 前端设计 skill 参考表 / 设计先行八条 / references 分册（platform-conventions 项目约定 1~12、mcp-manifest 互动接口、multi-actor 多 NPC 协作） |
 | `sustained-build` | 持续精造协议：复杂创作任务多轮自我精进（构建 → quality-scout 侦察 → 演进 → 整理），停下需要证据，仅管理员经「持续精造」按钮触发 |

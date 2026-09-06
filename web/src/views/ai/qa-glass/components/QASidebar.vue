@@ -20,6 +20,8 @@ const props = defineProps<{
   runningSessions: Record<string, boolean>;
   /** 「今日简报」功能开关（透传给底部用户菜单） */
   briefEnabled: boolean;
+  /** 「流式时展开调用过程」偏好（DB 落库，透传给底部用户菜单） */
+  toolProcessExpand: boolean;
 }>();
 
 // 画板（workflow）会话已融合进本页（挂板徽标，点击载入后自动伸出其板面板），计数同口径
@@ -39,6 +41,7 @@ const emit = defineEmits<{
   openProfile: [];
   openBrief: [];
   'update:briefEnabled': [value: boolean];
+  'update:toolProcessExpand': [value: boolean];
   loadSession: [key: string];
   startRename: [key: string, title: string, event: MouseEvent];
   commitRename: [];
@@ -336,7 +339,9 @@ function relTime(ts: number) {
       <footer class="sidebar-foot">
         <QAUserMenu
           :brief-enabled="briefEnabled"
+          :tool-process-expand="toolProcessExpand"
           @update:brief-enabled="emit('update:briefEnabled', $event)"
+          @update:tool-process-expand="emit('update:toolProcessExpand', $event)"
           @open-profile="emit('openProfile')"
         />
       </footer>

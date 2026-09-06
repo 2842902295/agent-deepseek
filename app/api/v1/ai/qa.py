@@ -416,6 +416,46 @@ async def _connector_cache_part(user_id: Optional[int], user_codes: frozenset = 
     return "_x" + hashlib.md5("|".join(parts).encode()).hexdigest()[:10]
 
 
+async def _resolve_board_binding(user_id: Optional[int], board_wf_key: Optional[str]) -> tuple[str, Optional[dict]]:
+    """应用制作「互动接口」绑定：签名片段 + 连接器配置（编进 agent cache_key）。
+
+    会话绑定到 html 应用制作板（board_wf_key）且其 apps/{wk}/mcp.json manifest 合法时，
+    返回 ("_b{指纹}", 连接器配置) → agent 挂上 app-board 桥（`mcp__app_{wk}__*` 工具面），
+    用户在对话中即可直接与应用互动（五子棋落子、多 NPC 社区发言……）。
+    manifest 改写 → 指纹变 → 下条消息 cache_key 变 → agent 自动重建（开发迭代闭环）。
+    非 html 板 / 非属主 / manifest 缺失或非法 → ("_b0", None)，不挂连接器（存量应用零影响）。
+    """
+    if user_id is None or not board_wf_key:
+        return "_b0", None
+    try:
+        from app.services.agent_runtime import app_manifest
+
+        manifest, _err, fp = await app_manifest.aload_manifest(user_id, board_wf_key)
+        if not manifest or not fp:
+            return "_b0", None
+        # 属主复核（须是本人名下未删除的 html 板）：桥内运行期还会再校验一次，
+        # 这里避免给非属主 / 节点板误挂连接器（manifest 恰好躺在目录里也不算数）
+        from app.models.standard.agent import AgentWorkflow
+
+        wf = await AgentWorkflow.get_or_none(workflow_key=board_wf_key, user_id=user_id, is_deleted=0)
+        if wf is None or (wf.board_type or "board") != "html":
+            return "_b0", None
+        import os
+
+        port = os.environ.get("APP_PORT", "9999")
+        bridge_token = os.environ.get("MCP_BRIDGE_TOKEN", "")
+        conn = {
+            "key": f"app_{board_wf_key}",
+            "transport": "streamable_http",
+            "url": f"http://127.0.0.1:{port}/mcp-bridge/app-board/{user_id}/{board_wf_key}/mcp",
+            "api_key": bridge_token or None,
+        }
+        return f"_b{fp}", conn
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[qa] 互动接口绑定解析失败（跳过） uid={user_id} wk={board_wf_key}: {e}")
+        return "_b0", None
+
+
 # ── 会话专家：@召唤驻留绑定（agent_session.expert_key） ─────────────────────
 
 
@@ -550,8 +590,10 @@ async def _prewarm_loop(uid: int, gen: int) -> None:
             # 按最近活跃会话的形态预热（含其驻留专家）；无会话则预热通用形态
             sess = await AgentSession.filter(user_id=uid, is_deleted=0).order_by("-update_time").first()
             session_key = sess.session_key if sess else f"prewarm_u{uid}"
+            # 按最近会话绑定的应用制作板预热（挂板形态：含互动接口连接器），免首条消息冷启动
+            _board_wf = sess.workflow_key if sess else None
             t0 = time.monotonic()
-            await _get_agent_for_session(session_key, uid)
+            await _get_agent_for_session(session_key, uid, _board_wf)
             dt = (time.monotonic() - t0) * 1000
             if _prewarm_gen.get(uid) == gen:
                 logger.info(f"[perf] agent 预热完成 uid={uid} session={session_key} 耗时 {dt:.0f}ms")
@@ -625,11 +667,12 @@ async def _run_skill_sync(ws: Path, user_id: Optional[int], _tier_codes, session
         _skill_sync_started.discard(str(ws))
 
 
-async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
+async def _get_agent_for_session(session_key: str, user_id: Optional[int], board_wf_key: Optional[str] = None):
     """按用户取/建 agent。workspace 为用户持久目录，skill 增量同步到其中（节流）。
 
-    agent 形态由「用户级配置 + 会话驻留专家」共同决定：专家编进 cache_key，
-    同一用户不同专家的会话各缓存一个实例。
+    agent 形态由「用户级配置 + 会话驻留专家 + 绑定的应用制作板」共同决定：专家与板
+    （board_wf_key，html 应用制作的互动接口 manifest 指纹）都编进 cache_key，任一变化
+    → key 变 → 自动重建对应形态。
     """
     ws = _user_workspace(user_id)
     _session_tmp_dir(ws, session_key)  # 确保 session 临时目录存在
@@ -714,6 +757,10 @@ async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
     except Exception as _e:  # noqa: BLE001
         logger.warning(f"[qa] register_turn_defaults 失败（忽略）: {_e}")
 
+    # 应用制作「互动接口」绑定：manifest 指纹编进 key（改写 mcp.json → key 变 → 自动重建），
+    # 合法时返回连接器配置挂 app-board 桥（下方 conn_configs 追加）
+    _board_part, _board_conn = await _resolve_board_binding(user_id, board_wf_key)
+
     # 连接器生效集签名也编进 key：添加/移除/启停连接器 → key 变 → agent 自动重建；
     # 会话驻留专家同样编进 key：召唤/移除专家、专家定义变化 → key 变 → 自动重建；
     # 档位集合编进 key：挂/摘标记角色 → key 变 → 可见面即时收紧/放开；
@@ -728,6 +775,7 @@ async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
         + await _connector_cache_part(user_id, _tier_codes)
         + _expert_cache_part(session_expert)
         + f"_d{_chat_mode or 'g'}_{_chat_level or 'g'}"
+        + _board_part
     )
 
     # 先无锁读：99% 走这条路径
@@ -783,6 +831,13 @@ async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
                 conn_configs.append({"key": c.connector_key, "transport": c.transport, "url": c.url, "api_key": api_key})
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[qa] 连接器配置加载失败（跳过）: {e}")
+
+        # 应用制作互动接口（app-board 桥）：manifest 合法时作为 per-(uid,wk) 回环连接器挂载。
+        # 走既有 streamable-http 连接器分支（qa_agent 把 api_key 注入 DSH_CONN_* env + header_js），
+        # 工具面 mcp__app_{wk}__*，dsh 未启用 toolFilter → 主 agent 与其 spawn 的子 agent 共享可见
+        # （多 NPC 协作场景的关键：并行委派的子 agent 也能调本应用的互动工具）。
+        if _board_conn:
+            conn_configs.append(_board_conn)
 
         # 会话驻留专家人设：构建期注入系统提示词（无条件则不注入，通用会话形态不变）
         _expert_payload = None
@@ -1797,7 +1852,10 @@ async def qa_chat_stream(request: QARequest):
 
     session_key_for_agent = session.session_key if session else _session_key_from_thread(thread_id)
     uid_for_mem = CTX_USER_ID.get() or 0
-    agent = await _get_agent_for_session(session_key_for_agent, CTX_USER_ID.get() or None)
+    # 绑定的应用制作板：本次消息带的 workflow_key 优先，否则用会话已归属的板
+    # （覆盖「面板收起但会话仍归属某 html 板」的场景，与下方 html 上下文注入分支同口径）
+    _board_wf_for_agent = request.workflow_key or (session.workflow_key if session else None)
+    agent = await _get_agent_for_session(session_key_for_agent, CTX_USER_ID.get() or None, _board_wf_for_agent)
     config = {"configurable": {"thread_id": thread_id, "user_id": str(uid_for_mem)}}
 
     # 先落 user 消息
@@ -1896,6 +1954,28 @@ async def qa_chat_stream(request: QARequest):
 
             file_lines = await asyncio.to_thread(_list_app_files)
             files_desc = "\n".join(file_lines) if file_lines else "（目录为空，请先写入口 index.html）"
+
+            # 互动接口（mcp.json）挂载状态回显：让 agent 明确知道「写了没挂上 / 校验失败为什么」，
+            # 避免它以为工具已生效却调不到。manifest 缺失 = 正常（纯展示/CRUD 应用无需互动接口）不回显。
+            _mcp_state_line = ""
+            try:
+                from app.services.agent_runtime import app_manifest
+
+                _mf, _mf_err, _mf_fp = await app_manifest.aload_manifest(uid, wf.workflow_key)
+                if _mf_err:
+                    _mcp_state_line = (
+                        f"⚠ 互动接口未挂载：apps/{wf.workflow_key}/mcp.json 校验失败——{_mf_err}。"
+                        "请修复后重新发送消息（工具面在下一条消息才可见）。\n"
+                    )
+                elif _mf:
+                    _tool_names = "、".join(t.get("name", "?") for t in _mf.get("tools", []))
+                    _mcp_state_line = (
+                        f"互动接口已挂载（指纹 {_mf_fp}）：本对话可用工具 mcp__app_{wf.workflow_key}__<name>，"
+                        f"已声明工具：{_tool_names}。用户在页面操作或对话中即可触发这些工具与应用互动。\n"
+                    )
+            except Exception as e:  # noqa: BLE001 —— 状态回显是增强，失败不影响主链路
+                logger.warning(f"[qa] 互动接口状态探测失败 {wf.workflow_key}: {e!r}")
+
             if wf.share_on:
                 _share_desc = "已开启·免登录模式（访客全部匿名，whoami 拿不到访客身份）" if wf.share_public else "已开启·仅登录用户模式（whoami 可识别访客身份）"
             else:
@@ -1907,6 +1987,7 @@ async def qa_chat_stream(request: QARequest):
                 f"分享状态: {_share_desc}\n"
                 f"应用目录: apps/{wf.workflow_key}/（相对工作目录）\n"
                 f"当前文件：\n{files_desc}\n"
+                f"{_mcp_state_line}"
                 f"用户提到的「看板」「页面」「应用」即指它。写完/改完文件后务必调用 "
                 f"publish_html_board(workflow_key={wf.workflow_key}) 发布，用户画布才会更新。\n\n"
             )
@@ -1958,6 +2039,7 @@ async def qa_chat_stream(request: QARequest):
         _sess_wf = await AgentWorkflow.get_or_none(workflow_key=session.workflow_key, user_id=uid, is_deleted=0)
         if _sess_wf:
             _bt = _sess_wf.board_type or "board"
+            _sess_mcp_line = ""
             if _bt == "html":
                 # 应用制作物化文件（与打开面板同款机制），防 agent 复用开工时读到空目录；失败不阻塞
                 try:
@@ -1966,12 +2048,25 @@ async def qa_chat_stream(request: QARequest):
                     await ensure_app_files(uid, _sess_wf.workflow_key)
                 except Exception as e:  # noqa: BLE001 —— 物化是增强路径，失败保持原行为
                     logger.warning(f"[qa] 应用制作文件物化失败（会话归属板）{_sess_wf.workflow_key}: {e!r}")
+                # 互动接口挂载状态（与打开面板分支同口径回显）
+                try:
+                    from app.services.agent_runtime import app_manifest
+
+                    _mf, _mf_err, _mf_fp = await app_manifest.aload_manifest(uid, _sess_wf.workflow_key)
+                    if _mf_err:
+                        _sess_mcp_line = f"⚠ 互动接口未挂载：apps/{_sess_wf.workflow_key}/mcp.json 校验失败——{_mf_err}。\n"
+                    elif _mf:
+                        _tool_names = "、".join(t.get("name", "?") for t in _mf.get("tools", []))
+                        _sess_mcp_line = f"互动接口已挂载（指纹 {_mf_fp}）：可用工具 mcp__app_{_sess_wf.workflow_key}__<name>（{_tool_names}）。\n"
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[qa] 互动接口状态探测失败（会话归属板）{_sess_wf.workflow_key}: {e!r}")
             _board_kind = (
                 "应用制作（html 页面型，文件在 apps/<key>/ 目录，改完用 publish_html_board 发布）" if _bt == "html" else "流程编排板（卡片+连线型，用 read_workflow / edit_workflow_board 读写）"
             )
             agent_input = (
                 "[本会话已归属一块板]\n"
                 f"workflow_key: {_sess_wf.workflow_key}，标题: {_sess_wf.title}，板型: {_board_kind}（用户可能收起了面板）。\n"
+                f"{_sess_mcp_line}"
                 "当前话题与这块板相关时，直接用该 workflow_key 调工作流工具继续上板干活；话题明确不搭时才考虑 create_workflow_board 另建。\n\n"
             ) + agent_input
 
@@ -2086,6 +2181,7 @@ async def qa_chat(request: QARequest):
         agent = await _get_agent_for_session(
             _session_key_from_thread(request.thread_id or "qa-anonymous"),
             CTX_USER_ID.get() or None,
+            request.workflow_key,
         )
         thread_id = request.thread_id or "qa-anonymous"
         uid_for_mem = CTX_USER_ID.get() or 0

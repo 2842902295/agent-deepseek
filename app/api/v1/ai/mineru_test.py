@@ -1,15 +1,16 @@
 """
 MinerU 单条测试接口
 
-用于单独调试定时任务中图片识别失败的记录。
-接受 type（table / foluma）和 id，调用 MinerU 解析后直接返回结果，
-不写入数据库、不写入日志表。
+用于单独调试定时任务（fill_image_text）中图片识别失败的记录：走与定时任务**完全相同**的
+候选地址解析（`app/utils/image_ref.py`）与 backend 回退逻辑，把每一步尝试明细返回，
+不写入数据库、不写入日志表（因此也能用来手工重试已被熔断 status='dead' 的记录）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter
@@ -19,25 +20,16 @@ from pydantic import BaseModel, Field
 from app.models.standard.jgh_pdf import StandardJghPdfFormula, StandardJghPdfTable
 from app.schemas.base import Fail, Success
 from app.settings.config import settings
-from app.utils.mineru import MinerUError, convert_to_markdown
+from app.utils.image_ref import ImageFetchError, build_image_candidates, fetch_first_available
+from app.utils.mineru import MinerUError, convert_bytes_to_markdown
 
 router = APIRouter(prefix="/mineru-test", tags=["MinerU测试"])
 
-# 与 scheduler.py 共用 settings.JGH_IMAGE_BASE_URL
-_IMAGE_BASE_URL = settings.JGH_IMAGE_BASE_URL
-_FALLBACK_HOST = "http://dzsy.iyunwen.com"
+# 与 scheduler.py 的 fill_image_text 保持一致
 _BACKENDS = ("vlm-engine", "pipeline")
-_MAX_RETRIES = 3
+_MAX_RETRIES = 5
 _RETRY_DELAY = 5
-
-
-def _is_download_error(exc: Exception) -> bool:
-    """判断是否为图片下载阶段的错误（HTTP 4xx/5xx、连接超时等）。"""
-    if isinstance(exc, httpx.HTTPStatusError):
-        return True
-    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout)):
-        return True
-    return False
+_DOWNLOAD_TIMEOUT = 60.0
 
 
 class MinerUTestRequest(BaseModel):
@@ -48,133 +40,108 @@ class MinerUTestRequest(BaseModel):
 @router.post("")
 async def test_mineru_recognition(req: MinerUTestRequest):
     """
-    单条测试 MinerU 图片识别（模拟定时任务逻辑，含 backend 降级 + 重试）。
+    单条测试 MinerU 图片识别（模拟定时任务逻辑，含候选地址轮转 + backend 降级 + 重试）。
 
     - type: table → 查 standard_jgh_pdf_table；foluma → 查 standard_jgh_pdf_formula
     - id: 对应表的主键
-    - 结果不写入数据库和日志表，仅返回
+    - 结果不写入数据库和日志表，仅返回（含每个候选地址 / 每次解析尝试的明细）
     """
     model_cls = StandardJghPdfTable if req.type == "table" else StandardJghPdfFormula
-    table_name = model_cls.Meta.table
+    table_name = str(model_cls.Meta.table)
 
     record = await model_cls.filter(id=req.id).first()
     if not record:
         return Fail(code="4004", msg=f"未找到记录：{table_name} id={req.id}")
 
-    file_name = record.file_name
-    image_path = record.image  # 例：/oss/privateDomain/20230111/2022/xxx.jpg
+    file_name: str | None = record.file_name
+    image_field: str | None = record.image  # 可能是 <img> 标签、也可能是 /oss/... 相对路径
 
-    if not file_name and not image_path:
+    if not file_name and not image_field:
         return Fail(code="4000", msg=f"该记录 file_name 和 image 均为空：{table_name} id={req.id}")
 
-    primary_url = (_IMAGE_BASE_URL + file_name.lstrip("/")) if file_name else None
-    fallback_url = (_FALLBACK_HOST + image_path) if image_path else None
-    # 优先使用 primary_url，若不存在则直接用 fallback_url 作为主地址
-    url = primary_url or fallback_url
-    logger.info(f"[MinerUTest] 开始测试 type={req.type} id={req.id} url={url}"
-                + (f" fallback={fallback_url}" if fallback_url and primary_url else ""))
+    candidates = build_image_candidates(
+        file_name=file_name,
+        image=image_field,
+        base_url=settings.JGH_IMAGE_BASE_URL,
+        public_base_url=settings.JGH_IMAGE_PUBLIC_BASE_URL,
+        legacy_host=settings.JGH_IMAGE_LEGACY_HOST,
+    )
+    base_data: dict[str, Any] = {
+        "type": req.type,
+        "id": req.id,
+        "table": table_name,
+        "file_name": file_name,
+        "image": (image_field or "")[:500],
+        "candidates": candidates,
+    }
+    if not candidates:
+        return Fail(code="4000", msg="file_name / image 解析不出可用图片地址（可能是占位图或脏值）", data=base_data)
+
+    logger.info(f"[MinerUTest] 开始测试 type={req.type} id={req.id} 候选 {len(candidates)} 个，首选 {candidates[0]}")
 
     t0 = time.monotonic()
-    attempts_log: list[dict] = []
-    last_error = ""
-    success = False
+    download_attempts: list[dict[str, Any]] = []
+    parse_attempts: list[dict[str, Any]] = []
     markdown = ""
-    used_fallback = False
+    last_error = ""
+    limits = httpx.Limits(max_connections=4, max_keepalive_connections=2)
 
-    for bi, backend in enumerate(_BACKENDS):
-        for attempt in range(1, _MAX_RETRIES + 1):
-            try:
-                markdown = await convert_to_markdown(url, backend=backend)
-                elapsed_ms = int((time.monotonic() - t0) * 1000)
-                attempts_log.append({
-                    "backend": backend,
-                    "attempt": attempt,
-                    "status": "ok",
-                    "url": url,
-                })
-                success = True
-                break
-            except MinerUError as e:
-                last_error = str(e)
-                attempts_log.append({
-                    "backend": backend,
-                    "attempt": attempt,
-                    "status": "mineru_error",
-                    "error": str(e),
-                    "url": url,
-                })
-                # MinerUError 中包含下载阶段的错误（响应内容为空等）→ 触发 fallback
-                if "图片下载失败" in str(e) and not used_fallback and fallback_url:
-                    logger.info(
-                        f"[MinerUTest] 图片下载失败（内容为空），切换到备用地址：{fallback_url}"
-                    )
-                    url = fallback_url
-                    used_fallback = True
-                    continue
-                logger.warning(
-                    f"[MinerUTest] MinerU 失败 backend={backend} "
-                    f"attempt={attempt}/{_MAX_RETRIES}: {e}"
-                )
-                if attempt < _MAX_RETRIES:
-                    import asyncio
-                    await asyncio.sleep(_RETRY_DELAY)
-            except Exception as e:
-                last_error = str(e)
-                attempts_log.append({
-                    "backend": backend,
-                    "attempt": attempt,
-                    "status": "exception",
-                    "error": str(e),
-                    "url": url,
-                })
-                # 下载失败且尚未尝试备用地址 → 切换到 fallback URL 继续
-                if _is_download_error(e) and not used_fallback and fallback_url:
-                    logger.info(
-                        f"[MinerUTest] 图片下载失败，切换到备用地址：{fallback_url}"
-                    )
-                    url = fallback_url
-                    used_fallback = True
-                    continue  # 用新 URL 重试，不消耗 backend 降级
-                logger.warning(
-                    f"[MinerUTest] 异常 backend={backend} "
-                    f"attempt={attempt}/{_MAX_RETRIES}: {e}"
-                )
-                break  # 非下载异常或已用过 fallback，不回退，直接终止
-        if success:
-            break
-        # 当前 backend 全部重试失败，回退到下一个
-        if bi < len(_BACKENDS) - 1:
-            logger.info(
-                f"[MinerUTest] backend={backend} 全部失败，回退到 {_BACKENDS[bi + 1]}"
+    async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0, read=_DOWNLOAD_TIMEOUT), limits=limits) as client:
+        # ① 下载：候选地址逐个尝试
+        try:
+            fetched = await fetch_first_available(
+                client,
+                candidates,
+                timeout=_DOWNLOAD_TIMEOUT,
+                filename_hint=file_name,
+                on_attempt=lambda url, kind, exc: download_attempts.append({"url": url, "kind": kind, "error": str(exc) or type(exc).__name__}),
+            )
+        except ImageFetchError as e:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.warning(f"[MinerUTest] 全部候选地址下载失败 type={req.type} id={req.id} permanent={e.permanent}: {e.summary()}")
+            return Fail(
+                code="5000",
+                msg=f"图片下载失败（permanent={e.permanent}，permanent=true 表示定时任务会把该记录熔断）：{e.summary()}",
+                data={**base_data, "elapsed_ms": elapsed_ms, "download_attempts": download_attempts},
             )
 
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
+        # ② 解析：backend 逐个回退，每个 backend 重试 _MAX_RETRIES 次
+        for bi, backend in enumerate(_BACKENDS):
+            for attempt in range(1, _MAX_RETRIES + 1):
+                try:
+                    markdown = await convert_bytes_to_markdown(
+                        fetched.data,
+                        fetched.filename,
+                        content_type=fetched.content_type,
+                        client=client,
+                        backend=backend,
+                    )
+                    parse_attempts.append({"backend": backend, "attempt": attempt, "status": "ok"})
+                    break
+                except MinerUError as e:
+                    last_error = f"backend={backend} MinerU 错误: {e}"
+                except Exception as e:  # noqa: BLE001 —— MinerU 服务 5xx / 连接抖动等
+                    last_error = f"backend={backend} {type(e).__name__}: {e}"
+                parse_attempts.append({"backend": backend, "attempt": attempt, "status": "error", "error": last_error[:300]})
+                if attempt < _MAX_RETRIES:
+                    await asyncio.sleep(_RETRY_DELAY)
+            if markdown:
+                break
+            if bi < len(_BACKENDS) - 1:
+                logger.info(f"[MinerUTest] backend={backend} 全部失败，回退到 {_BACKENDS[bi + 1]}")
 
-    if success:
-        return Success(data={
-            "type": req.type,
-            "id": req.id,
-            "table": table_name,
-            "file_name": file_name,
-            "url": url,
-            "used_fallback": used_fallback,
-            "markdown": markdown,
-            "elapsed_ms": elapsed_ms,
-            "attempts": attempts_log,
-        })
-    else:
-        return Fail(
-            code="5000",
-            msg=f"MinerU 识别失败：{last_error}",
-            data={
-                "type": req.type,
-                "id": req.id,
-                "table": table_name,
-                "file_name": file_name,
-                "url": url,
-                "used_fallback": used_fallback,
-                "elapsed_ms": elapsed_ms,
-                "attempts": attempts_log,
-                "last_error": last_error,
-            },
-        )
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    result = {
+        **base_data,
+        "url": fetched.url,
+        "used_fallback": fetched.url != candidates[0],
+        "bytes": len(fetched.data),
+        "content_type": fetched.content_type,
+        "elapsed_ms": elapsed_ms,
+        "download_attempts": download_attempts,
+        "parse_attempts": parse_attempts,
+    }
+
+    if markdown:
+        return Success(data={**result, "markdown": markdown})
+    return Fail(code="5000", msg=f"MinerU 识别失败：{last_error}", data=result)

@@ -499,13 +499,16 @@ declare namespace Api {
       mode: string;
       /** 当前模式生效档（wire 值 none/low/medium/high/max；无档位块为 null） */
       thinkingLevel: string | null;
+      /** 流式输出时自动展开工具调用过程（false=一直收折，默认；true=输出时展开、完成后收折） */
+      toolProcessExpand: boolean;
       modes: ChatModeOption[];
     }
 
-    /** 对话模式：PUT /ai/chat-mode 入参（两字段均可省略，省略=不改该项） */
+    /** 对话模式：PUT /ai/chat-mode 入参（各字段均可省略，省略=不改该项） */
     interface ChatModePrefUpdate {
       mode?: string;
       thinkingLevel?: string;
+      toolProcessExpand?: boolean;
     }
 
     /** 对话模式配置：超管视角单个模式行（GET /ai/chat-mode/config） */

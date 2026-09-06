@@ -134,8 +134,12 @@ type Message = {
   contentSegments?: ContentSegment[] | null;
   /** 过程时间线条目（dsh 两段式：过程时间线 + 结果；历史消息由 thinking/toolSteps 兼容转换而来） */
   process?: ProcessStep[];
-  /** 时间线折叠态（done 后自动收起；aborted/error 保持展开） */
+  /** 时间线折叠态（done 后自动收起；aborted/error 保持展开）——作为各工具组的默认折叠态 */
   processCollapsed?: boolean;
+  /** 异常终止/出错回合强制展开时间线（便于排查），不受「流式时展开过程」偏好影响 */
+  processForceExpand?: boolean;
+  /** 单个工具组的显式折叠态覆盖（key = 组块 key）；缺省回落 processCollapsed */
+  groupCollapsed?: Record<string, boolean>;
   /** 回合时长（首个 process 事件 → done，摘要行展示） */
   processDurationMs?: number | null;
   /** 首个 process 事件到达时刻（内部计时用） */
@@ -376,6 +380,12 @@ async function applyChatModePref(patch: Api.AI.ChatModePrefUpdate) {
   if (chatModePref.value) {
     chatModePref.value = {...chatModePref.value, ...patch};
   }
+}
+
+/** 用户菜单「流式时展开调用过程」开关：走 chat-mode 偏好落库（agent_user_chat_pref.tool_process_expand），
+    纯前端展示偏好——后端不重建 agent，PUT 成功即全局生效（isGroupCollapsed 响应式读取） */
+function setToolProcessExpand(v: boolean) {
+  applyChatModePref({toolProcessExpand: v});
 }
 
 // 按 sessionKey 隔离的单条流 abort 句柄；草稿态暂存到 '' key，发出后迁移到真实 sessionKey
@@ -749,7 +759,13 @@ function handleProcessEvent(msg: Message, event: ProcessEvent) {
       break;
     }
     case 'tool_call': {
-      // 定性：未闭合尾部 text 转叙述（条目已在时间线）→ 结果区清空重算
+      // 定性：未闭合尾部 text 转叙述（新输出模式：叙述条目留在 process，由输出流作为正文块平铺渲染）。
+      // 把 live 期已做过内联提取的 msg.content（chart/html fence 已抽走换成 [artifact:-id] 标记）
+      // 同步回条目，保证叙述块渲染结果与用户刚才在答案区看到的完全一致 → 结果区清空重算
+      if (msg.openTextId && msg.process) {
+        const open = msg.process.find(i => i.id === msg.openTextId);
+        if (open && open.kind === 'text') open.content = msg.content;
+      }
       msg.openTextId = null;
       msg.content = '';
       msg.contentHtml = '';
@@ -1915,29 +1931,157 @@ function getQuestionnaireById(msg: Message, id: string): ProcessStep | undefined
   return (msg.process || []).find(p => p.kind === 'questionnaire' && p.id === id);
 }
 
-/** 问卷作答配对：第 k 条「问卷回答：」回流消息回答第 k 个未配对问卷。
- * （qid 每回合从 qn1 重新计数，跨回合会重名，必须按顺序配对而非按 id）
- * 同时解析作答行（`- q1 (标题): 值`）为 问题 id → 值，供卡片只读回显实际答案。 */
+// ───── 输出流分块（主流 agent 输出模式）──────────────────────────────────
+// 消息正文 = 按 process 条目顺序交错的「叙述文本块」与「工具活动组」：
+// - text 条目（被后续 tool_call 定性为叙述的中间话语）作为正文平铺渲染，不折叠；
+// - 连续的 tool_call/tool_result/reasoning/todo/compaction 条目合并为一个可折叠组卡；
+// - questionnaire 条目仍走正文占位符渲染卡片，不进流块；
+// - 打开中的尾部 text（openTextId）跳过——它正由答案区（msg.content 镜像）流式渲染，位置恰好是流末尾；
+// - done 后被提升为答案的条目已从 process 剔除，msg.content 作为最终答案块渲染在流末尾（无跳动）。
+type FlowTextBlock = {
+  type: 'text';
+  key: string;
+  segments: ContentSegment[] | null;
+  html: string;
+  artifacts: AgentArtifact[];
+};
+type FlowToolsBlock = {
+  type: 'tools';
+  key: string;
+  items: ProcessStep[];
+  /** 流式进行中的尾部工具组（进行中脉冲 + 默认展开） */
+  live: boolean;
+  /** 是否为消息的最后一个流块（回合时长只挂在末组摘要行） */
+  last: boolean;
+};
+type FlowBlock = FlowTextBlock | FlowToolsBlock;
+
+/** 已定性叙述块的渲染缓存：条目内容定性后冻结，按 (内容长度, artifacts 数) 记忆化，避免流式期反复 re-mark */
+const flowTextCache = new WeakMap<ProcessStep, { len: number; artLen: number; block: FlowTextBlock }>();
+
+function buildNarrationBlock(it: ProcessStep, msg: Message): FlowTextBlock {
+  const raw = it.content || '';
+  const artLen = msg.artifacts?.length ?? 0;
+  const cached = flowTextCache.get(it);
+  if (cached && cached.len === raw.length && cached.artLen === artLen) return cached.block;
+  // live 定性路径已在 tool_call 时把剥离版（fence→[artifact:-id] 标记）同步进条目，这里提取为空操作；
+  // 对历史回放的 DB 原始快照（fence 未剥离）兜底再提取一次——块内局部 artifacts，不写回 msg
+  const r1 = extractChartBlocks(raw);
+  const r2 = extractHtmlBlocks(r1.stripped);
+  const text = r2.stripped;
+  const local = [...r1.charts, ...r2.htmlArtifacts];
+  const arts = local.length ? [...(msg.artifacts || []), ...local] : (msg.artifacts || []);
+  const segments = buildContentSegments(text, arts);
+  const block: FlowTextBlock = {
+    type: 'text',
+    key: it.id,
+    segments,
+    html: segments ? '' : (marked.parse(stripArtifactMarkers(text)) as string),
+    artifacts: arts
+  };
+  flowTextCache.set(it, { len: raw.length, artLen, block });
+  return block;
+}
+
+function buildFlowBlocks(msg: Message): FlowBlock[] {
+  const blocks: FlowBlock[] = [];
+  let toolBuf: ProcessStep[] = [];
+  const flush = () => {
+    if (toolBuf.length) {
+      blocks.push({ type: 'tools', key: `g-${toolBuf[0].id}`, items: toolBuf, live: false, last: false });
+      toolBuf = [];
+    }
+  };
+  for (const it of msg.process || []) {
+    if (it.kind === 'questionnaire') continue;
+    if (it.kind === 'text') {
+      if (it.id === msg.openTextId) continue; // 打开中的尾部文本由答案区渲染（位置即流末尾）
+      flush();
+      blocks.push(buildNarrationBlock(it, msg));
+    } else {
+      toolBuf.push(it);
+    }
+  }
+  flush();
+  if (blocks.length) {
+    // 流式进行中的尾部工具组标记 live（进行中脉冲）
+    const tail = blocks[blocks.length - 1];
+    if (msg.loading && tail.type === 'tools') tail.live = true;
+    // 回合时长挂在最后一个工具组摘要行
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.type === 'tools') {
+        b.last = true;
+        break;
+      }
+    }
+  }
+  return blocks;
+}
+
+/** 工具组折叠态：显式覆盖优先；异常/停止回合强制展开便于排查；
+ * 否则看用户偏好（DB 落库 chatModePref.toolProcessExpand）——
+ * 关（默认）= 流式中与完成后一律收折；开 = 跟随消息级 processCollapsed（流式展开 → done 收折） */
+function isGroupCollapsed(msg: Message, key: string): boolean {
+  const explicit = msg.groupCollapsed?.[key];
+  if (explicit !== undefined) return explicit;
+  if (msg.processForceExpand) return false;
+  if (!chatModePref.value?.toolProcessExpand) return true;
+  return !!msg.processCollapsed;
+}
+
+function setGroupCollapsed(msg: Message, key: string, v: boolean): void {
+  if (!msg.groupCollapsed) msg.groupCollapsed = {};
+  msg.groupCollapsed[key] = v;
+}
+
+/** 叙述块内 [artifact:ID] 占位符查找（块级 artifacts = msg.artifacts + 块内局部提取） */
+function getBlockArtifactById(block: FlowTextBlock, id: number): AgentArtifact[] {
+  const found = block.artifacts.find(a => a.id === id);
+  return found ? [found] : [];
+}
+
+/** 问卷作答配对 + 忽略判定（单次遍历同一把尺子）：
+ * - 第 k 条「问卷回答：」回流消息回答第 k 个未配对问卷
+ *   （qid 每回合从 qn1 重新计数，跨回合会重名，必须按顺序配对而非按 id）；
+ *   同时解析作答行（`- q1 (标题): 值`）为 问题 id → 值，供卡片只读回显实际答案。
+ * - 用户没点问卷、直接发了普通消息 = 绕过：该问卷及此前所有未配对问卷标记为忽略（置灰），
+ *   并从配对队列移除——被绕过的问卷永远不会再收到回流答案，留着会错位后面的配对。 */
 const ANSWER_MARK = '问卷回答：';
 const ANSWER_LINE_RE = /^-\s*(q\d+)\s*[（(][^()（）]*[)）]\s*[:：]\s*(.*)$/;
-const qnAnswers = computed(() => {
-  const map = new Map<number, Map<string, Record<string, string>>>();
+const qnPairing = computed(() => {
+  const answers = new Map<number, Map<string, Record<string, string>>>();
+  const ignored = new Map<number, Set<string>>();
   const pending: Array<{msgId: number; qid: string}> = [];
   for (const m of messages.value) {
     if (m.role === 'user') {
-      if ((m.content || '').trimStart().startsWith(ANSWER_MARK) && pending.length) {
-        const p = pending.shift()!;
-        const per: Record<string, string> = {};
-        for (const line of (m.content || '').split('\n')) {
-          const mm = ANSWER_LINE_RE.exec(line.trim());
-          if (mm) per[mm[1]] = mm[2].trim();
+      const t = (m.content || '').trimStart();
+      if (t.startsWith(ANSWER_MARK)) {
+        if (pending.length) {
+          const p = pending.shift()!;
+          const per: Record<string, string> = {};
+          for (const line of t.split('\n')) {
+            const mm = ANSWER_LINE_RE.exec(line.trim());
+            if (mm) per[mm[1]] = mm[2].trim();
+          }
+          let inner = answers.get(p.msgId);
+          if (!inner) {
+            inner = new Map();
+            answers.set(p.msgId, inner);
+          }
+          inner.set(p.qid, per);
         }
-        let inner = map.get(p.msgId);
-        if (!inner) {
-          inner = new Map();
-          map.set(p.msgId, inner);
+      } else if (pending.length) {
+        // 普通用户消息 = 绕过问卷：全部未配对问卷置灰
+        for (const p of pending) {
+          let s = ignored.get(p.msgId);
+          if (!s) {
+            s = new Set();
+            ignored.set(p.msgId, s);
+          }
+          s.add(p.qid);
         }
-        inner.set(p.qid, per);
+        pending.length = 0;
       }
       continue;
     }
@@ -1945,8 +2089,11 @@ const qnAnswers = computed(() => {
       if (it.kind === 'questionnaire') pending.push({msgId: m.id, qid: it.id});
     }
   }
-  return map;
+  return {answers, ignored};
 });
+const qnAnswers = computed(() => qnPairing.value.answers);
+/** 被用户直接输入绕过的问卷（msgId → qid 集）：卡片置灰只读 */
+const qnIgnored = computed(() => qnPairing.value.ignored);
 
 /** 功能性用户消息前缀：消息原样发后端（模型要看），但不在聊天里展示——
  * 问卷作答后用户看到的直接就是 agent 的回复。可复用约定：
@@ -2224,12 +2371,14 @@ async function sendSingle(text: string) {
           msg.currentTool = '';
           msg.processDurationMs = msg.processStartedAt ? Date.now() - msg.processStartedAt : null;
           msg.processCollapsed = false; // 异常终止回合时间线保持展开
+          msg.processForceExpand = true; // 不受「一直收折」偏好影响，便于排查
         } else if (event.type === 'error') {
           msg.error = event.message;
           msg.loading = false;
           msg.currentTool = '';
           msg.processDurationMs = msg.processStartedAt ? Date.now() - msg.processStartedAt : null;
           msg.processCollapsed = false;
+          msg.processForceExpand = true;
         } else if (event.type === 'quota_exceeded') {
           msg.error = event.message || '积分余额不足，请联系管理员';
           msg.loading = false;
@@ -2307,6 +2456,7 @@ function handleStop() {
       m.currentTool = '';
       m.stopped = true;
       m.error = null;
+      m.processForceExpand = true; // 手动停止的回合时间线保持展开（与 aborted 事件路径一致）
       break;
     }
   }
@@ -3534,6 +3684,7 @@ defineExpose({
       :renaming-title="renamingTitle"
       :running-sessions="runningSessions"
       :brief-enabled="briefEnabled"
+      :tool-process-expand="chatModePref?.toolProcessExpand ?? false"
       @new-session="handleSidebarNewSession"
       @toggle-sidebar="!embedded && (sidebarOpen = !sidebarOpen)"
       @open-tasks="taskDrawerOpen = true"
@@ -3546,6 +3697,7 @@ defineExpose({
       @open-profile="handleOpenProfile"
       @open-brief="openBrief()"
       @update:brief-enabled="setBriefEnabled"
+      @update:tool-process-expand="setToolProcessExpand"
       @load-session="loadSession"
       @start-rename="startRename"
       @commit-rename="commitRename"
@@ -3772,7 +3924,7 @@ defineExpose({
                 <!--
  卷首：下面那排功能卡的「头」——与卡片同族（圆角 / 图标牌 / 同一组色相），
                    但存在感压到最低：一抹淡彩 + 发丝边框，不抢卡片的戏。
-                   书桌模式只换文案（职业名），样式与「全部功能」完全一致 
+                   书桌模式只换文案（职业名），样式与「全部功能」完全一致
 -->
                 <header class="codex-front">
                   <div class="codex-front-left">
@@ -3979,7 +4131,7 @@ defineExpose({
 
               <!--
  空白章节：无功能可看时的「待收录」跨页——幽灵卡预演目录形状，
-                 把空白变成有意为之的留白，而不是看起来像 bug 的空屏 
+                 把空白变成有意为之的留白，而不是看起来像 bug 的空屏
 -->
               <section v-else key="blank" class="codex-body codex-body--blank">
                 <div class="codex-blank" :class="`codex-blank--${showcaseBlankKind}`">
@@ -4124,73 +4276,109 @@ defineExpose({
 
               <!-- ASSISTANT -->
               <div v-else-if="msg.role === 'assistant'" class="assistant-response">
-                <!-- 过程时间线（dsh 两段式）：思考/叙述/工具/子代理/清单；done 后折叠为摘要行。
-                     openTextId 指向的打开中 text 条目正由结果区渲染，时间线不重复展示（D2 无跳动）。 -->
-                <!-- 续接段（问卷作答后的回复）照常渲染自己的时间线：问卷前后虽属同一次回答，
-                     但作答后 agent 的工具调用/子代理委派等过程不能丢——done 后折叠为摘要行，
-                     视觉上仍是一条紧凑的灰行，不会切断正文连续性。 -->
-                <ProcessTimeline
-                  v-if="msg.process && msg.process.some(i => i.id !== msg.openTextId && i.kind !== 'questionnaire')"
-                  v-model:collapsed="msg.processCollapsed"
-                  :items="msg.process"
-                  :live="msg.loading"
-                  :duration-ms="msg.processDurationMs"
-                  :open-text-id="msg.openTextId"
-                />
-
-                <!-- Loading：打字机已在输出且无工具调用时，不再呈现"思考中" -->
-                <div v-if="msg.loading && (msg.currentTool || !msg.content)" class="loading-line">
-                  <span class="orbit-dual">
-                    <span class="star" /><span class="star" />
-                    <span class="inner-ring"><span class="inner-star" /></span>
-                  </span>
-                  <span class="loading-text">{{ msg.currentTool ? `执行 · ${msg.currentTool}` : '思考中...' }}</span>
-                </div>
-
-                <!-- Error -->
-                <div v-if="msg.error" class="error-line">
-                  <span class="error-tag">异常</span>
-                  <span>{{ msg.error }}</span>
-                </div>
-
-                <!-- 用户主动停止：非异常，中性提示 -->
-                <div v-if="msg.stopped" class="stopped-line">
-                  <span class="stopped-tag">已停止</span>
-                  <span>用户主动停止了本次回答</span>
-                </div>
-
-                <!-- Answer -->
-                <div v-if="msg.contentHtml || msg.contentSegments?.length" class="answer" :class="{ streaming: msg.loading }">
+                <!-- 输出流（主流 agent 模式）：叙述正文平铺渲染、连续工具活动折叠成组卡，按 process 顺序交错。
+                     单头像方块领头；流式期打开中的尾部文本由答案区（流末尾）镜像渲染，定性后就地转为叙述块，无位置跳动。
+                     续接段（问卷作答后的回复）照常渲染自己的输出流：问卷前后虽属同一次回答，
+                     但作答后 agent 的工具调用/子代理委派等过程不能丢——done 后各组折叠为摘要行。 -->
+                <div class="answer answer-flow">
                   <!--
  头像方块：字面文本置空，「同」由 ::after 渲染——避免靠 font-size:0 藏文字，
-                     该写法在导出图（html-to-image 克隆渲染）里会藏不住而漏出「A.同」两层 
+                     该写法在导出图（html-to-image 克隆渲染）里会藏不住而漏出「A.同」两层
 -->
                   <div class="answer-mark" aria-hidden="true"></div>
-                  <!-- inline 模式：分段内容包在 flex:1 的 wrapper 里 -->
-                  <template v-if="msg.contentSegments?.length">
-                    <div class="answer-body-segments">
-                      <template v-for="(seg, si) in msg.contentSegments" :key="si">
+                  <div class="flow-col">
+                    <template v-for="block in buildFlowBlocks(msg)" :key="block.key">
+                      <!-- 叙述文本块：与正常输出文本一致渲染（支持产物/问卷占位符分段） -->
+                      <div v-if="block.type === 'text'" class="flow-text">
+                        <template v-if="block.segments?.length">
+                          <template v-for="(seg, si) in block.segments" :key="si">
+                            <!-- eslint-disable-next-line vue/no-v-html -->
+                            <div v-if="seg.type === 'html'" class="answer-body" v-html="seg.html" />
+                            <ArtifactList
+                              v-else-if="seg.type === 'artifact' && getBlockArtifactById(block, seg.id).length"
+                              :artifacts="getBlockArtifactById(block, seg.id)"
+                              :inline="true"
+                            />
+                            <SurveyCard
+                              v-else-if="seg.type === 'questionnaire'"
+                              :qid="seg.id"
+                              :questions="getQuestionnaireById(msg, seg.id)?.questions || []"
+                              :answers="qnAnswers.get(msg.id)?.get(seg.id)"
+                              :ignored="qnIgnored.get(msg.id)?.has(seg.id)"
+                              :disabled="running"
+                              @submit="onSurveySubmit"
+                            />
+                          </template>
+                        </template>
                         <!-- eslint-disable-next-line vue/no-v-html -->
-                        <div v-if="seg.type === 'html'" class="answer-body" :class="{ 'is-last-segment': si === msg.contentSegments.length - 1 }" v-html="seg.html" />
-                        <ArtifactList
-                          v-else-if="seg.type === 'artifact' && getArtifactById(msg, seg.id).length"
-                          :artifacts="getArtifactById(msg, seg.id)"
-                          :inline="true"
-                        />
-                        <SurveyCard
-                          v-else-if="seg.type === 'questionnaire'"
-                          :qid="seg.id"
-                          :questions="getQuestionnaireById(msg, seg.id)?.questions || []"
-                          :answers="qnAnswers.get(msg.id)?.get(seg.id)"
-                          :disabled="running"
-                          @submit="onSurveySubmit"
-                        />
+                        <div v-else class="answer-body" v-html="block.html" />
+                      </div>
+
+                      <!-- 工具活动组：折叠组卡（默认态跟随消息级 processCollapsed，用户可逐组展开/收起） -->
+                      <ProcessTimeline
+                        v-else
+                        :collapsed="isGroupCollapsed(msg, block.key)"
+                        :items="block.items"
+                        :live="block.live"
+                        :duration-ms="block.last ? msg.processDurationMs : null"
+                        :open-text-id="msg.openTextId"
+                        @update:collapsed="v => setGroupCollapsed(msg, block.key, v)"
+                      />
+                    </template>
+
+                    <!-- 进行中 / 最终答案：流式期 = 打开中尾部文本的镜像；done 后 = 被提升的正文 -->
+                    <div
+                      v-if="msg.contentHtml || msg.contentSegments?.length"
+                      class="flow-answer"
+                      :class="{ streaming: msg.loading }"
+                    >
+                      <template v-if="msg.contentSegments?.length">
+                        <template v-for="(seg, si) in msg.contentSegments" :key="si">
+                          <!-- eslint-disable-next-line vue/no-v-html -->
+                          <div v-if="seg.type === 'html'" class="answer-body" :class="{ 'is-last-segment': si === msg.contentSegments.length - 1 }" v-html="seg.html" />
+                          <ArtifactList
+                            v-else-if="seg.type === 'artifact' && getArtifactById(msg, seg.id).length"
+                            :artifacts="getArtifactById(msg, seg.id)"
+                            :inline="true"
+                          />
+                          <SurveyCard
+                            v-else-if="seg.type === 'questionnaire'"
+                            :qid="seg.id"
+                            :questions="getQuestionnaireById(msg, seg.id)?.questions || []"
+                            :answers="qnAnswers.get(msg.id)?.get(seg.id)"
+                            :ignored="qnIgnored.get(msg.id)?.has(seg.id)"
+                            :disabled="running"
+                            @submit="onSurveySubmit"
+                          />
+                        </template>
                       </template>
+                      <!-- eslint-disable-next-line vue/no-v-html -->
+                      <div v-else class="answer-body" v-html="msg.contentHtml" />
                     </div>
-                  </template>
-                  <!-- 普通模式：单个 answer-body，与原来完全一致 -->
-                  <div v-else class="answer-body" v-html="msg.contentHtml" />
-                  <div class="answer-actions">
+
+                    <!-- Loading：打字机已在输出且无工具调用时，不再呈现"思考中" -->
+                    <div v-if="msg.loading && (msg.currentTool || !msg.content)" class="loading-line">
+                      <span class="orbit-dual">
+                        <span class="star" /><span class="star" />
+                        <span class="inner-ring"><span class="inner-star" /></span>
+                      </span>
+                      <span class="loading-text">{{ msg.currentTool ? `执行 · ${msg.currentTool}` : '思考中...' }}</span>
+                    </div>
+
+                    <!-- Error -->
+                    <div v-if="msg.error" class="error-line">
+                      <span class="error-tag">异常</span>
+                      <span>{{ msg.error }}</span>
+                    </div>
+
+                    <!-- 用户主动停止：非异常，中性提示 -->
+                    <div v-if="msg.stopped" class="stopped-line">
+                      <span class="stopped-tag">已停止</span>
+                      <span>用户主动停止了本次回答</span>
+                    </div>
+                  </div>
+
+                  <div v-if="msg.contentHtml || msg.contentSegments?.length" class="answer-actions">
                     <button class="answer-export" title="导出为 Markdown" @click="exportMessageAsMd(msg)">
                       <span class="ae-icon">↧</span>
                       <span>导出 md</span>
@@ -4205,7 +4393,7 @@ defineExpose({
         <!-- ─── Question minimap (right-edge track) ─────────────────────── -->
         <!--
  hover 判定挂在可见的 rail 上而非外层 aside：aside 是 top:0/bottom:0 全高
-           透明区，挂它上面时鼠标上下移出弹窗仍算悬停、永不收折 
+           透明区，挂它上面时鼠标上下移出弹窗仍算悬停、永不收折
 -->
         <aside
           v-if="questionList.length"
@@ -4310,7 +4498,7 @@ defineExpose({
     <!--
  伴侣面板：流程编排 / 应用制作挂进对话（grid 第三轨道；仅独立模式，嵌入/窄屏不渲染）。
          板是主角：默认占内容区 2/3（1fr : 2fr），分隔条可拖宽并记忆。
-         内容与流程编排专页共挂同一画板成品组件 board-shell，对话经 boardBridge 注入 
+         内容与流程编排专页共挂同一画板成品组件 board-shell，对话经 boardBridge 注入
 -->
     <div v-if="boardPanelVisible" class="board-panel-col">
       <div class="bp-resizer" title="拖动调整比例，双击回到 2/3 默认" @pointerdown="onPanelResizeStart" @dblclick="resetPanelRatio" />
@@ -7451,7 +7639,7 @@ defineExpose({
 .conversation {
   max-width: 820px;
   margin: 0 auto;
-  padding: 36px 48px 56px;
+  padding: 36px 48px 0;
 }
 
 .exchange {
@@ -7483,7 +7671,7 @@ defineExpose({
 }
 
 /* 贴着：压掉问卷卡片下边距与续接段首个块的上边距 */
-.exchange.pre-continuation .answer-body-segments > :last-child {
+.exchange.pre-continuation .flow-col > :last-child {
   margin-bottom: 0;
 }
 
@@ -7859,10 +8047,10 @@ button.q-att-file {
   50%, 100% { opacity: 0; }
 }
 
-.answer.streaming .answer-body :deep(p:last-child)::after,
-.answer.streaming .answer-body > p:last-child::after,
-.answer.streaming .answer-body.is-last-segment :deep(p:last-child)::after,
-.answer.streaming .answer-body.is-last-segment > p:last-child::after {
+.flow-answer.streaming .answer-body :deep(p:last-child)::after,
+.flow-answer.streaming .answer-body > p:last-child::after,
+.flow-answer.streaming .answer-body.is-last-segment :deep(p:last-child)::after,
+.flow-answer.streaming .answer-body.is-last-segment > p:last-child::after {
   content: '\25AE';
   font-size: 0.85em;
   color: var(--accent);
@@ -7871,8 +8059,8 @@ button.q-att-file {
   animation: answer-cursor-blink 0.85s step-end infinite;
 }
 
-.answer.streaming .answer-body :deep(pre code),
-.answer.streaming .answer-body.is-last-segment :deep(pre code) {
+.flow-answer.streaming .answer-body :deep(pre code),
+.flow-answer.streaming .answer-body.is-last-segment :deep(pre code) {
   -webkit-text-fill-color: #e2e8f0;
 }
 
@@ -7991,12 +8179,29 @@ button.q-att-file {
   line-height: 1;
 }
 
-.answer-body-segments {
+/* ── 输出流：头像列 + 内容列（叙述块 / 工具组 / 答案交错，主流 agent 输出模式）── */
+.flow-col {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+
+/* 叙述文本块：内部 segment 序列紧贴（段落间距由 markdown 自身 margin 提供） */
+.flow-text {
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  min-width: 0;
+}
+
+/* 进行中 / 最终答案块 */
+.flow-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
 }
 
 .answer-body {
@@ -10204,13 +10409,16 @@ button.q-att-file {
   background: rgba(31, 32, 36, 0.12);
 }
 
-/* ── 过程时间线在 ink 主题下去玻璃化（与旧 tool-trace 一致，走 token 自然降饱和） ── */
-:root[data-qa-theme='ink'] .assistant-response .ptl-box {
-  background: var(--surface);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+/* ── 过程时间线胶囊在 ink 主题下去玻璃化（样张 ink --card-bg 值） ── */
+:root[data-qa-theme='ink'] .assistant-response .ptl-pill {
+  background: rgba(255, 255, 255, 0.6);
   border-color: rgba(31, 32, 36, 0.08);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
+}
+
+:root[data-qa-theme='ink'] .assistant-response .ptl-pill:hover {
+  border-color: rgba(31, 32, 36, 0.25);
+  box-shadow: 0 2px 10px rgba(31, 32, 36, 0.06);
 }
 
 /* ── Kimi 首屏上半：浅蓝 pill + wordmark ── */

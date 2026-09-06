@@ -1271,6 +1271,7 @@ async function loadWorkflow(wk: string) {
   redoStack.value = [];
   ctxMenu.value = null;
   connectMenu.value = null;
+  pendingAppChat = null;
   dismissEcho();
   boardType.value = data.boardType === 'html' ? 'html' : 'board';
   if (boardType.value === 'html') {
@@ -1342,6 +1343,48 @@ async function sendExample(prompt: string) {
   if (await waitQaReady()) qaRef.value.sendMessage(prompt);
 }
 
+/** 应用页内 AppBridge.sendToChat 呼叫 agent（反向通道）：把页内文本作为一条用户消息触发回合，
+ *  完成后经 respond 回执给页内（页内据此提示 / 退避）。照 notifyReviewAnswered 先例：
+ *  开对话窗 → 等就绪 → sendMessage。
+ *  忙时口径（对局场景核心）：agent 回合进行中（刚应完一手还在输出）用户又落子，旧口径
+ *  「拒绝 busy」会丢掉这一手——回合结束后没人补发，agent 永远不响应。改为排队：只保留
+ *  最新一条（对局呼叫幂等，旧的被覆盖无害），editLocked 落回 false 时自动补发；
+ *  排队即向页内回执 ok（别让页面误报失败或盲目重试）。 */
+let pendingAppChat: {text: string; wk: string} | null = null;
+
+watch(editLocked, (locked, wasLocked) => {
+  if (locked || !wasLocked || !pendingAppChat) return;
+  const p = pendingAppChat;
+  pendingAppChat = null;
+  if (p.wk !== workflowKey.value) return; // 已切板：作废
+  void deliverAppChat(p.text);
+});
+
+/** 实际投递：开对话窗 → 等 QAGlass 就绪 → sendMessage。失败（就绪超时）返回 false。
+ *  注意不做 doSave 冲刷——html 板没有本地节点/连线编辑态，此前无条件 doSave 会 PUT 相同
+ *  title 把 version bump 起来 → 轮询命中 → iframe 假重载 /「新版本已就绪」条莫名冒出。 */
+async function deliverAppChat(text: string): Promise<boolean> {
+  emit('request-chat');
+  const ok = await waitQaReady();
+  if (!ok) return false;
+  qaRef.value?.sendMessage(text);
+  return true;
+}
+
+async function onAppChat(p: {text: string; respond: (ok: boolean, reason?: string) => void}) {
+  const {text, respond} = p;
+  if (!workflowKey.value || boardType.value !== 'html') {
+    respond(false, 'no-board');
+    return;
+  }
+  if (editLocked.value) {
+    pendingAppChat = {text, wk: workflowKey.value};
+    respond(true);
+    return;
+  }
+  respond(await deliverAppChat(text) ? true : false, 'no-channel');
+}
+
 // ── 保存 ──────────────────────────────────────────────────────────────────
 function scheduleSave() {
   lastLocalEdit = Date.now();
@@ -1353,8 +1396,10 @@ function scheduleSave() {
 async function doSave() {
   if (!workflowKey.value) return;
   // 应用制作：数据在任务目录文件里（agent 维护），人端只有标题可编辑——只发 {title}，
-  // 绝不带 nodes/edges（空数组会 bump version 并把 editor 打成 human，污染发布信号）
+  // 绝不带 nodes/edges（空数组会 bump version 并把 editor 打成 human，污染发布信号）；
+  // 标题没变就整体 no-op 不 PUT（后端已加同值不 bump 的双保险，这里再省一次请求）
   if (boardType.value === 'html') {
+    if (title.value === baselineTitle) return;
     await fetchUpdateWorkflow(workflowKey.value, {title: title.value});
     baselineTitle = title.value; // 标题已落库：更新基线，轮询跟随 agent 改名才有正确参照
     saveState.value = 'saved';
@@ -2472,6 +2517,7 @@ defineExpose({
         :entry-ready="entryReady"
         @recheck="recheckHtmlTask"
         @edit-state="onHtmlEditState"
+        @app-chat="onAppChat"
       />
     </div>
 

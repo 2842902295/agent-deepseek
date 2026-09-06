@@ -124,7 +124,8 @@ class AgentUserChatPref(BaseModel, TimestampMixin):
     user_id = fields.IntField(unique=True, description="所属用户ID")
     mode = fields.CharField(max_length=16, null=True, default=None, description="所选模式 key；null=默认；指向被删模式时读时回落 balanced")
     thinking_level = fields.CharField(max_length=16, null=True, default=None, description="思考强度 wire 档位值；null=块默认档（默认不开）")
+    tool_process_expand = fields.IntField(default=0, description="流式输出时自动展开工具调用过程：1=展开（输出完成自动收折） 0=一直收折（默认，可手动逐组展开）；纯前端展示偏好，不参与 agent 构建")
 
     class Meta:
         table = "agent_user_chat_pref"
-        table_description = "用户对话偏好（模式 + 思考强度）"
+        table_description = "用户对话偏好（模式 + 思考强度 + 过程展示）"

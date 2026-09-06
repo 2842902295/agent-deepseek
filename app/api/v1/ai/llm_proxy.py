@@ -7,7 +7,8 @@ LLM 回环代理：dsh 运行时（pi-ai 适配器）的模型路由指向本服
 而 dsh 插件的 models entry schema 不收 reasoning 字段）——配置路径无法发出
 关思考参数，导致每个复杂回合巨慢（数百 reasoning 块）。回环代理复用
 `_build_thinking_extra_body` 的按 provider 翻译逻辑，把 thinking 三态落到 wire 上：
-百炼 qwen 统一发 reasoning_effort（none=完全关）、kimi 发 reasoning_effort=minimal、
+百炼 qwen 统一发 reasoning_effort（none=完全关）、百炼直供 kimi/kimi-k3（model 名精确匹配）
+发 reasoning_effort=minimal 地板、
 Ollama=think、Claude=thinking.type、自部署=chat_template_kwargs。
 
 两条路由（thinking 来源不同，转发实现共用 _forward）：
