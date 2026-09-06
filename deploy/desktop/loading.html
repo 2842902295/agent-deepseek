@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>__APP_NAME__</title>
+<style>
+  /* ══ 品牌令牌（与 qa-glass 玻璃主题同款） ══ */
+  :root {
+    --paper: #f5f7fb;
+    --ink: #0f172a;
+    --ink-2: #334155;
+    --ink-3: #64748b;
+    --ink-4: #94a3b8;
+    --c-blue: #1e40af; --c-blue-2: #2563eb; --c-sky: #0ea5e9; --c-cyan: #0891b2;
+    --grad-brand: linear-gradient(110deg, #1e40af 0%, #2563eb 35%, #0ea5e9 70%, #0891b2 100%);
+    --font-body: -apple-system, 'PingFang SC', 'HarmonyOS Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    user-select: none; overflow: hidden; position: relative;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ══ 氛围层：多层 aurora 光斑 + 微噪点纹理，填充空旷感 ══ */
+  .atmosphere {
+    position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  }
+  /* 主光斑：左上蓝 */
+  .atmosphere::before {
+    content: ''; position: absolute;
+    width: 900px; height: 560px; left: -8%; top: -12%;
+    background: radial-gradient(ellipse at center, rgba(37, 99, 235, 0.13) 0%, rgba(37, 99, 235, 0.04) 45%, transparent 70%);
+    animation: aurora-drift-1 12s ease-in-out infinite alternate;
+  }
+  /* 副光斑：右下青 */
+  .atmosphere::after {
+    content: ''; position: absolute;
+    width: 1000px; height: 620px; right: -10%; bottom: -8%;
+    background: radial-gradient(ellipse at center, rgba(8, 145, 178, 0.11) 0%, rgba(14, 165, 233, 0.04) 45%, transparent 70%);
+    animation: aurora-drift-2 15s ease-in-out infinite alternate;
+  }
+  /* 第三层：中心偏右的微弱暖光，打破纯冷色调单调 */
+  .glow-center {
+    position: absolute; z-index: 0; pointer-events: none;
+    width: 600px; height: 400px; left: 38%; top: 30%;
+    background: radial-gradient(ellipse at center, rgba(14, 165, 233, 0.06) 0%, transparent 65%);
+    animation: aurora-drift-3 18s ease-in-out infinite alternate;
+  }
+  /* 微噪点纹理：给纯色底加质感，消除"空"的感觉 */
+  .noise {
+    position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.028;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+  }
+
+  @keyframes aurora-drift-1 {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(40px, 25px) scale(1.08); }
+  }
+  @keyframes aurora-drift-2 {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(-35px, -20px) scale(1.06); }
+  }
+  @keyframes aurora-drift-3 {
+    from { transform: translate(0, 0) scale(1); opacity: 0.6; }
+    to   { transform: translate(20px, -15px) scale(1.1); opacity: 1; }
+  }
+
+  /* ══ 右侧主视觉图 ══ */
+  .hero-visual {
+    position: absolute; z-index: 0; pointer-events: none;
+    right: -2vw; top: 50%; transform: translateY(-50%);
+    width: 42vw; max-width: 680px; min-width: 320px;
+    height: auto; aspect-ratio: 9 / 16;
+    opacity: 0;
+    animation: visual-enter 1.2s ease .4s both;
+    /* 左边缘渐隐遮罩，让图片自然融入浅色背景 */
+    mask-image: linear-gradient(to right, transparent 0%, black 18%, black 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 18%, black 100%);
+  }
+  .hero-visual img {
+    width: 100%; height: 100%; object-fit: contain;
+    display: block;
+  }
+  /* 图片微浮动呼吸感 */
+  .hero-visual-inner {
+    animation: visual-breathe 8s ease-in-out infinite;
+  }
+  @keyframes visual-enter {
+    from { opacity: 0; transform: translateY(-50%) translateX(30px); }
+    to   { opacity: 1; transform: translateY(-50%) translateX(0); }
+  }
+  @keyframes visual-breathe {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-10px); }
+  }
+
+  /* ══ 内容入场动画 ══ */
+  .fadein { animation: fadein .9s ease both; }
+  .fadein-d1 { animation: fadein .9s ease .15s both; }
+  .fadein-d2 { animation: fadein .9s ease .3s both; }
+  .fadein-d3 { animation: fadein .9s ease .5s both; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ══ 左锚排版 ══ */
+  .stage {
+    position: absolute; left: 9vw; top: 50%; transform: translateY(-62%);
+    max-width: 580px; z-index: 1;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 12px; letter-spacing: .55em; color: var(--ink-4);
+    margin-bottom: 26px; text-transform: uppercase;
+  }
+  .eyebrow::before {
+    content: ''; display: block; width: 18px; height: 1.5px;
+    background: var(--grad-brand); border-radius: 1px;
+  }
+  .name {
+    font-size: 44px; font-weight: 700; letter-spacing: .05em; line-height: 1.2;
+    color: var(--ink);
+  }
+  .name b {
+    font-weight: 700;
+    background: var(--grad-brand);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .subtitle {
+    margin-top: 18px; font-size: 15px; color: var(--ink-3);
+    letter-spacing: .08em; line-height: 1.6;
+  }
+  .tip-row {
+    margin-top: 40px; display: flex; align-items: center; gap: 14px;
+    min-height: 22px; transition: opacity .35s ease;
+  }
+  /* 脉冲圆点 */
+  .pulse-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--c-blue-2);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35);
+    animation: pulse-ring 2s ease-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pulse-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
+    70%  { box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+  }
+  .tip {
+    font-size: 13px; color: var(--ink-3); letter-spacing: .1em;
+  }
+
+  /* ══ 进度条（替代纯文字等待感） ══ */
+  .progress-track {
+    margin-top: 20px; width: 220px; height: 2.5px;
+    background: rgba(37, 99, 235, 0.08); border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; width: 0%; border-radius: 2px;
+    background: var(--grad-brand); background-size: 200% 100%;
+    animation: progress-flow 2s linear infinite;
+    transition: width .6s ease;
+  }
+  @keyframes progress-flow {
+    from { background-position: 0% 0; } to { background-position: 200% 0; }
+  }
+
+  /* ══ 地平线 ══ */
+  .horizon {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 3px; z-index: 2;
+    background: var(--grad-brand); background-size: 220% 100%;
+    animation: flow 7s linear infinite;
+    opacity: .9;
+  }
+  .horizon::before {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 40px;
+    background: linear-gradient(to top, rgba(37, 99, 235, .12), rgba(14, 165, 233, .04), transparent);
+    pointer-events: none;
+  }
+  .horizon::after {
+    content: ''; position: absolute; top: 0; bottom: 0; width: 22%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .92), transparent);
+    animation: sweep 3.6s ease-in-out infinite;
+  }
+  @keyframes flow { from { background-position: 0% 0; } to { background-position: 220% 0; } }
+  @keyframes sweep { from { left: -24%; } to { left: 104%; } }
+
+  /* ══ 右下角品牌标识（打包期替换 __APP_MARK__） ══ */
+  .brand-mark {
+    position: fixed; right: 32px; bottom: 24px; z-index: 2;
+    font-size: 11px; letter-spacing: .15em; color: var(--ink-4); opacity: 0.6;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .horizon, .horizon::after, .fadein, .fadein-d1, .fadein-d2, .fadein-d3,
+    .hero-visual, .hero-visual-inner, .pulse-dot, .progress-bar,
+    .atmosphere::before, .atmosphere::after, .glow-center { animation: none; }
+    .hero-visual { opacity: 1; transform: translateY(-50%) translateX(0); }
+    .pulse-dot { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.3); }
+  }
+</style>
+</head>
+<body>
+  <!-- 氛围层 -->
+  <div class="atmosphere"></div>
+  <div class="glow-center"></div>
+  <div class="noise"></div>
+
+  <!-- 右侧主视觉图 -->
+  <div class="hero-visual">
+    <div class="hero-visual-inner">
+      <img src="aurora-visual.jpg" alt="">
+    </div>
+  </div>
+
+  <!-- 主内容 -->
+  <div class="stage">
+    <div class="eyebrow fadein">正在启动</div>
+    <div class="name fadein-d1">__APP_NAME_HTML__</div>
+    <div class="subtitle fadein-d2">__APP_TAGLINE__</div>
+    <div class="tip-row fadein-d3" id="tipRow">
+      <div class="pulse-dot"></div>
+      <div class="tip" id="tip">正在启动本地服务…</div>
+    </div>
+    <div class="progress-track fadein-d3">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+  </div>
+
+  <div class="brand-mark fadein-d3">__APP_MARK__</div>
+  <div class="horizon"></div>
+
+<script>
+  // launcher 通过 URL 查询参数传入实际端口（端口可能被自动换过）
+  var port = new URLSearchParams(location.search).get('port') || '9999';
+  var target = 'http://localhost:' + port + '/';
+  var started = Date.now();
+
+  // 文案按真实启动阶段递进：导入核心模块（最久）→ 连接数据库 → 收尾
+  var tips = [
+    [0,  '正在启动本地服务…'],
+    [5,  '正在加载核心模块…'],
+    [25, '正在连接数据库…'],
+    [70, '即将就绪，请耐心等待…']
+  ];
+  var tipEl = document.getElementById('tip');
+  var barEl = document.getElementById('progressBar');
+  var cur = tips[0][1];
+
+  // 进度条按启动阶段模拟推进（探活成功即整页跳走，走不满无所谓）
+  function updateProgress() {
+    var s = (Date.now() - started) / 1000;
+    var pct;
+    if (s < 5)       pct = s / 5 * 20;
+    else if (s < 25) pct = 20 + (s - 5) / 20 * 30;
+    else if (s < 70) pct = 50 + (s - 25) / 45 * 30;
+    else             pct = Math.min(80 + (s - 70) / 30 * 15, 95);
+    barEl.style.width = pct + '%';
+  }
+  setInterval(updateProgress, 500);
+  updateProgress();
+
+  // 提示文案轮播
+  setInterval(function () {
+    var s = (Date.now() - started) / 1000, msg = tips[0][1];
+    for (var i = 0; i < tips.length; i++) if (s >= tips[i][0]) msg = tips[i][1];
+    if (msg !== cur) {
+      cur = msg;
+      tipEl.style.opacity = '0';
+      setTimeout(function () { tipEl.textContent = msg; tipEl.style.opacity = '1'; }, 180);
+    }
+  }, 1000);
+
+  function probe() {
+    // no-cors：只要后端有任何 HTTP 响应即算就绪（响应内容无所谓）
+    fetch(target, { mode: 'no-cors', cache: 'no-store' }).then(function () {
+      location.replace(target);
+    }).catch(function () {
+      if (Date.now() - started > 180000) {
+        tipEl.textContent = '启动超时：请关闭本窗口后重试；仍失败请查看安装目录 logs\\backend.log';
+        return;
+      }
+      setTimeout(probe, 300);
+    });
+  }
+  probe();
+</script>
+</body>
+</html>

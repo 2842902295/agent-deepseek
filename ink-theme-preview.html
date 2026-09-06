@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QA-Glass 主题样张 · Kimi 风格（参照 www.kimi.com 实测截图）</title>
+<style>
+/* ============================================================
+   QA-Glass 第二主题样张 —— 「KIMI 风」
+   严格参照 www.kimi.com 实测截图提取的设计准则：
+
+   1. 中性灰白双色底：主区 #FBFBFC / 侧栏 #F7F7F8，无渐变无光晕
+   2. 侧栏扁平列表：黑色方圆 logo、白色「新建会话」卡(+Ctrl K 键帽)、
+      线性图标导航行、底部灰卡(邀请有奖位)与用户行(升级键帽位)
+   3. 首屏以品牌 wordmark + 超大输入框为主角，功能入口降级为
+      输入框下方的圆角 pill 一排；输入框下叠「选择项目」灰带
+   4. 全页唯一彩色 = 顶部浅蓝 pill（蓝 #3D7BF6 / 底 #E7EFFD）
+   5. 发送按钮 = 圆形（灰=空 / 黑=有内容）；主操作黑、其余全灰阶
+   6. 阴影极弱，靠底色分层（白卡浮于灰底）；圆角大（卡 14-20）
+   7. 会话流：用户右对齐浅灰气泡；AI 无头像纯文本编辑式排版
+   ============================================================ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --font-body: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'HarmonyOS Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+html, body { height: 100%; }
+body { font-family: var(--font-body); overflow: hidden; }
+
+/* ────────────── 双主题变量 ────────────── */
+
+/* 新主题 KIMI 风（默认） */
+.shell[data-theme="kimi"] {
+  --bg: #fbfbfc;              /* 主区近白 */
+  --bg-side: #f7f7f8;         /* 侧栏浅灰 */
+  --card: #ffffff;            /* 白色浮卡 */
+  --fill: #f1f1f3;            /* hover 填充 */
+  --fill-2: #efeff1;          /* 灰带 / 灰卡（邀请有奖、选择项目、探索灵感） */
+  --ink: #17181a;
+  --ink-2: #494a50;
+  --ink-3: #7e7f86;
+  --ink-4: #b9bac0;
+  --line: rgba(31, 32, 36, 0.07);   /* 发丝线 */
+  --line-2: rgba(31, 32, 36, 0.13);
+  --blue: #3d7bf6;            /* 全页唯一彩色 */
+  --blue-bg: #e7effd;
+  --send-off: #d6d6da;        /* 发送圆钮空态 */
+  --on-primary: #ffffff;
+  --bubble-user: #f0f1f3;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.03), 0 10px 30px -14px rgba(0, 0, 0, 0.10);
+  --shadow-pop: 0 2px 8px rgba(0, 0, 0, 0.05), 0 20px 50px -20px rgba(0, 0, 0, 0.18);
+  --blur: none;
+  --grad-brand: none;
+  --r-card: 14px;
+  --r-input: 22px;
+  --r-ctl: 10px;
+  color-scheme: light;
+}
+
+/* 现有「极光玻璃」主题（等比复刻，仅用于对照） */
+.shell[data-theme="glass"] {
+  --bg: #f5f7fb;
+  --bg-side: rgba(255, 255, 255, 0.42);
+  --card: rgba(255, 255, 255, 0.62);
+  --fill: rgba(30, 64, 175, 0.06);
+  --fill-2: rgba(30, 64, 175, 0.08);
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --ink-3: #64748b;
+  --ink-4: #94a3b8;
+  --line: rgba(30, 64, 175, 0.12);
+  --line-2: rgba(30, 64, 175, 0.28);
+  --blue: #1e40af;
+  --blue-bg: rgba(30, 64, 175, 0.08);
+  --send-off: #94a3b8;
+  --on-primary: #ffffff;
+  --bubble-user: rgba(30, 64, 175, 0.09);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-input: 0 24px 64px -28px rgba(30, 64, 175, 0.35);
+  --shadow-pop: 0 24px 64px -20px rgba(30, 64, 175, 0.32);
+  --blur: blur(36px) saturate(190%);
+  --grad-brand: linear-gradient(110deg, #1e40af 0%, #2563eb 35%, #0ea5e9 70%, #0891b2 100%);
+  --r-card: 16px;
+  --r-input: 18px;
+  --r-ctl: 12px;
+  color-scheme: light;
+}
+
+.shell {
+  display: flex;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  transition: background 0.3s ease;
+}
+/* 玻璃主题的氛围光（kimi 下失效） */
+.shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(700px 420px at 12% -6%, rgba(37, 99, 235, 0.10), transparent 62%),
+    radial-gradient(760px 460px at 96% 108%, rgba(8, 145, 178, 0.09), transparent 60%);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.shell[data-theme="glass"]::before { opacity: 1; }
+
+/* ══════════════ 侧栏（Kimi：扁平列表） ══════════════ */
+
+.sidebar {
+  width: 272px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-side);
+  border-right: 1px solid var(--line);
+  transition: background 0.3s ease;
+}
+.shell[data-theme="glass"] .sidebar { backdrop-filter: var(--blur); border-right-color: var(--line); }
+
+.side-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 12px;
+}
+/* 黑色方圆 logo（Kimi 的 K 牌） */
+.side-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #131316;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.shell[data-theme="glass"] .side-logo { background: var(--grad-brand); }
+
+.side-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.side-collapse:hover { background: var(--fill); color: var(--ink); }
+
+/* 新建会话：白色浮卡 + Ctrl K 键帽 */
+.side-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 12px 14px;
+  height: 52px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.side-new:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07); transform: translateY(-1px); }
+.shell[data-theme="glass"] .side-new { background: var(--grad-brand); color: #fff; border: none; }
+.side-new svg { flex-shrink: 0; }
+.side-new-kbd { margin-left: auto; display: flex; gap: 4px; }
+.kbd {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--fill);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.shell[data-theme="glass"] .kbd { background: rgba(255, 255, 255, 0.22); color: rgba(255, 255, 255, 0.9); }
+
+.side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 10px; }
+.side-scroll::-webkit-scrollbar { width: 5px; }
+.side-scroll::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, 0.22); border-radius: 4px; }
+
+/* 功能导航行（插件/定时任务位 → 技能/任务/工作流/搜索） */
+.side-nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.side-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.side-row:hover { background: var(--fill); }
+.side-row svg { color: var(--ink-2); flex-shrink: 0; }
+
+.side-group-label {
+  padding: 12px 12px 6px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.side-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.side-item:hover { background: var(--fill); color: var(--ink); }
+.side-item.is-active { background: var(--fill-2); color: var(--ink); font-weight: 600; }
+.shell[data-theme="glass"] .side-item.is-active { background: var(--fill-2); color: var(--blue); }
+.side-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-item-star { font-size: 10px; color: var(--ink-4); }
+
+/* 底部灰卡（Kimi「邀请有奖」位 → 今日简报入口） */
+.side-brief {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 12px 8px;
+  padding: 12px 14px;
+  border: none;
+  border-radius: var(--r-card);
+  background: var(--fill-2);
+  font-family: var(--font-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.side-brief:hover { background: #e9e9ec; }
+.shell[data-theme="glass"] .side-brief:hover { background: var(--fill-2); }
+.side-brief svg { color: var(--ink-2); flex-shrink: 0; }
+.side-brief-t { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.side-brief-s { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.side-brief-arrow { margin-left: auto; color: var(--ink-4); }
+
+/* 底部用户行（头像 + 升级键帽位 + 下载图标位） */
+.side-foot { padding: 4px 12px 14px; }
+.side-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 8px;
+  border: none;
+  border-radius: var(--r-card);
+  background: transparent;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.side-user:hover { background: var(--fill); }
+.side-user-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+.shell[data-theme="glass"] .side-user-avatar { background: var(--grad-brand); border: none; color: #fff; }
+.side-user-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.chip-mini {
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-2);
+  box-shadow: var(--shadow-card);
+}
+.side-user-dl { margin-left: auto; color: var(--ink-3); display: flex; }
+
+/* ══════════════ 主栏 ══════════════ */
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* 顶栏：Kimi 式近乎隐形（无底色，仅发丝下边线在会话态出现） */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 20px;
+  flex-shrink: 0;
+}
+.shell[data-theme="kimi"] .topbar.in-chat { border-bottom: 1px solid var(--line); }
+
+.tb-title { font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-spacer { flex: 1; }
+
+.tb-iconbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.tb-iconbtn:hover { background: var(--fill); color: var(--ink); }
+
+/* 样张控件：视图 / 主题切换（中性分段，Kimi 键帽感） */
+.seg {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--fill-2);
+}
+.seg-btn {
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+}
+.seg-btn:hover { color: var(--ink); }
+.seg-btn.on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-card); }
+
+/* 舞台 */
+.stage { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ════════ 首屏（Kimi：wordmark + 大输入框主角） ════════ */
+
+.welcome {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 40px 24px;
+}
+.welcome::-webkit-scrollbar { width: 6px; }
+.welcome::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, 0.2); border-radius: 4px; }
+
+/* 顶部唯一彩色：浅蓝 pill（Kimi「升级套餐」位 → 今日简报） */
+.blue-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--blue-bg);
+  color: var(--blue);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+  flex-shrink: 0;
+}
+.blue-pill:hover { filter: brightness(0.97); }
+
+/* 品牌 wordmark（KIMI 位） */
+.wordmark {
+  margin: auto 0 34px;
+  padding-top: 40px;
+  text-align: center;
+  user-select: none;
+}
+.wordmark-main {
+  font-size: 84px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  color: #131316;
+}
+.shell[data-theme="glass"] .wordmark-main {
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.wordmark-sub {
+  margin-top: 10px;
+  font-size: 13px;
+  letter-spacing: 0.28em;
+  color: var(--ink-4);
+}
+
+/* 输入框主体 + 下叠灰带（Kimi「选择项目」位 → 标准池） */
+.composer-hero { width: 100%; max-width: 880px; position: relative; }
+
+.composer {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--r-input);
+  background: var(--card);
+  box-shadow: var(--shadow-input);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.shell[data-theme="glass"] .composer { backdrop-filter: var(--blur); }
+.composer:focus-within { border-color: var(--line-2); }
+
+.composer-input {
+  width: 100%;
+  min-height: 96px;
+  max-height: 220px;
+  padding: 20px 24px 8px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+  resize: none;
+  outline: none;
+}
+.composer-input::placeholder { color: var(--ink-4); }
+
+.composer-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px 12px 14px; }
+
+.cp-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.cp-plus:hover { background: var(--fill); }
+
+.cp-spacer { flex: 1; }
+
+/* 快速/进阶 模式选择（Kimi 原样：黑粗 + 灰 + 箭头） */
+.cp-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background 0.14s ease;
+}
+.cp-mode:hover { background: var(--fill); }
+.cp-mode b { color: var(--ink); font-weight: 600; }
+.cp-mode span { color: var(--ink-4); }
+.cp-mode svg { color: var(--ink-4); }
+
+/* 圆形发送钮：灰=空 / 黑=有内容 */
+.cp-send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: var(--send-off);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+.cp-send.on { background: #131316; }
+.shell[data-theme="glass"] .cp-send.on { background: var(--blue); }
+.cp-send:active { transform: scale(0.94); }
+
+/* 下叠灰带：选择项目位 → 标准池 */
+.composer-band {
+  position: relative;
+  z-index: 0;
+  margin: -14px 6px 0;
+  padding: 26px 22px 12px;
+  border-radius: 18px;
+  background: var(--fill-2);
+}
+.band-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+  transition: background 0.14s ease;
+}
+.band-btn:hover { background: rgba(0, 0, 0, 0.04); }
+.band-btn svg { color: var(--ink-3); }
+
+/* 功能 pill 一排（Kimi 原样：白底发丝边圆角 pill） */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin: 26px 0 0;
+  max-width: 880px;
+}
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.pill:hover { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); transform: translateY(-1px); }
+.pill svg { color: var(--ink-2); }
+.pill.on { background: #131316; border-color: #131316; color: #fff; }
+.pill.on svg { color: #fff; }
+.shell[data-theme="glass"] .pill.on { background: var(--blue); border-color: var(--blue); }
+
+/* 案例网格（点「探索案例」展开；Kimi 式白卡） */
+.case-grid {
+  width: 100%;
+  max-width: 880px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+.case-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  background: var(--card);
+  cursor: pointer;
+  transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+.case-card:hover { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07); transform: translateY(-1px); }
+.case-card-head { display: flex; align-items: center; gap: 8px; }
+.case-card-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.case-card-skill { font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); margin-left: auto; }
+.case-card-desc {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.case-card-foot { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-4); }
+.case-card-foot b { color: var(--ink-3); font-weight: 600; }
+
+/* 底部探索卡（Kimi「探索灵感」位） */
+.explore-card {
+  width: 100%;
+  max-width: 880px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 17px 20px;
+  border: none;
+  border-radius: 16px;
+  background: var(--fill-2);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+.explore-card:hover { background: #e9e9ec; }
+.shell[data-theme="glass"] .explore-card:hover { background: var(--fill-2); }
+.explore-card svg { color: var(--ink-3); }
+.explore-right { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 13px; }
+.explore-right svg { transition: transform 0.2s ease; }
+.explore-card.open .explore-right svg { transform: rotate(180deg); }
+
+/* ════════ 会话流（Kimi：用户浅灰气泡 / AI 无头像纯文本） ════════ */
+
+.chat { flex: 1; min-height: 0; overflow-y: auto; padding: 32px 0 24px; }
+.chat::-webkit-scrollbar { width: 6px; }
+.chat::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, 0.2); border-radius: 4px; }
+
+.chat-inner { max-width: 800px; margin: 0 auto; padding: 0 32px; display: flex; flex-direction: column; gap: 26px; }
+
+.msg-user { display: flex; justify-content: flex-end; }
+.msg-user-bubble {
+  max-width: 76%;
+  padding: 12px 18px;
+  border-radius: 18px 18px 6px 18px;
+  background: var(--bubble-user);
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.shell[data-theme="glass"] .msg-user-bubble { border: 1px solid rgba(30, 64, 175, 0.10); }
+
+/* AI：无头像、无气泡，直接排版 */
+.msg-ai-body { min-width: 0; }
+.msg-ai-content { font-size: 14.5px; line-height: 1.85; color: var(--ink); }
+.msg-ai-content p { margin-bottom: 12px; }
+.msg-ai-content strong { font-weight: 600; }
+.msg-ai-content ul { margin: 0 0 12px; padding-left: 2px; list-style: none; }
+.msg-ai-content li { position: relative; padding-left: 16px; margin-bottom: 6px; }
+.msg-ai-content li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.75em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.msg-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 13px;
+}
+.msg-table th {
+  background: var(--fill-2);
+  padding: 9px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+.msg-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  line-height: 1.55;
+  background: var(--card);
+}
+.msg-table tr:last-child td { border-bottom: none; }
+
+.msg-sources { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.msg-src {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.msg-src:hover { background: var(--fill); }
+.msg-src::before { content: '§'; margin-right: 5px; color: var(--ink-4); }
+
+.msg-ai-actions { display: flex; gap: 2px; opacity: 0.55; transition: opacity 0.15s ease; }
+.msg-ai:hover .msg-ai-actions { opacity: 1; }
+.msg-act {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.msg-act:hover { background: var(--fill); color: var(--ink); }
+
+.msg-thinking { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-3); }
+.msg-thinking-dots { display: inline-flex; gap: 3px; }
+.msg-thinking-dots i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--ink-4);
+  animation: think 1.2s infinite ease-in-out;
+}
+.msg-thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
+.msg-thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes think {
+  0%, 70%, 100% { opacity: 0.3; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* 会话态输入框（复用首屏组件，收窄） */
+.composer-chat { padding: 0 32px 16px; flex-shrink: 0; }
+.composer-chat .composer-hero { max-width: 800px; margin: 0 auto; }
+.composer-chat .composer-input { min-height: 48px; padding-top: 14px; }
+.composer-chat .composer-band { display: none; }
+
+/* ══════════════ 用户菜单弹层（主题切换入口） ══════════════ */
+
+.pop-anchor { position: fixed; left: 14px; bottom: 70px; z-index: 50; pointer-events: none; }
+
+.user-pop {
+  pointer-events: auto;
+  width: 236px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  transform: translateY(8px) scale(0.97);
+  transform-origin: bottom left;
+  visibility: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+.shell[data-theme="glass"] .user-pop { backdrop-filter: var(--blur); }
+.user-pop.open { opacity: 1; transform: translateY(0) scale(1); visibility: visible; }
+
+.up-head { display: flex; align-items: center; gap: 10px; padding: 8px 8px 10px; }
+.up-avatar {
+  width: 34px; height: 34px; border-radius: 10px;
+  background: var(--fill-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: var(--ink);
+  flex-shrink: 0;
+}
+.shell[data-theme="glass"] .up-avatar { background: var(--grad-brand); color: #fff; }
+.up-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.up-sub { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); margin-top: 2px; }
+
+.up-divider { height: 1px; margin: 4px 8px; background: var(--line); }
+
+.up-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.up-row:hover { background: var(--fill); color: var(--ink); }
+.up-row svg { color: var(--ink-3); flex-shrink: 0; }
+.up-row:hover svg { color: var(--ink); }
+.up-row--switch { justify-content: space-between; cursor: default; }
+.up-row--switch:hover { background: transparent; color: var(--ink-2); }
+.up-row--danger:hover { background: rgba(220, 38, 38, 0.06); color: #dc2626; }
+.up-row--danger:hover svg { color: #dc2626; }
+.up-label { display: flex; align-items: center; gap: 10px; }
+
+/* 主题分段（真实落地位置：QAUserMenu 弹层内新增一行） */
+.up-theme-seg {
+  display: flex;
+  gap: 3px;
+  margin: 2px 10px 8px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--fill-2);
+}
+.up-theme-btn {
+  flex: 1;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+}
+.up-theme-btn:hover { color: var(--ink); }
+.up-theme-btn.on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-card); }
+
+/* iOS 开关 */
+.switch { position: relative; width: 34px; height: 20px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 100%; height: 100%; position: absolute; margin: 0; cursor: pointer; z-index: 1; }
+.switch-track { position: absolute; inset: 0; border-radius: 999px; background: #d6d6da; transition: background 0.2s ease; }
+.switch-thumb {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.switch input:checked ~ .switch-track { background: #131316; }
+.shell[data-theme="glass"] .switch input:checked ~ .switch-track { background: var(--blue); }
+.switch input:checked ~ .switch-thumb { transform: translateX(14px); }
+
+/* 样张说明浮标 */
+.preview-note {
+  position: fixed;
+  right: 20px;
+  bottom: 18px;
+  max-width: 260px;
+  padding: 10px 13px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+  background: var(--card);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--ink-3);
+  z-index: 40;
+  box-shadow: var(--shadow-card);
+}
+.preview-note b { color: var(--ink-2); }
+
+[hidden] { display: none !important; }
+
+.fade-slide { animation: fadeSlide 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes fadeSlide {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 900px) {
+  .sidebar { display: none; }
+  .preview-note { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="shell" data-theme="kimi" id="shell">
+
+  <!-- ══════════ 侧栏 ══════════ -->
+  <aside class="sidebar">
+    <div class="side-top">
+      <span class="side-logo">同</span>
+      <button class="side-collapse" title="收起侧栏">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9.5 4v16"/></svg>
+      </button>
+    </div>
+
+    <button class="side-new">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+      新建会话
+      <span class="side-new-kbd"><span class="kbd">Ctrl</span><span class="kbd">K</span></span>
+    </button>
+
+    <div class="side-scroll">
+      <div class="side-nav">
+        <button class="side-row">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M6 6l2 2m8 8 2 2m0-12-2 2M8 16l-2 2"/><circle cx="12" cy="12" r="3"/></svg>
+          技能
+        </button>
+        <button class="side-row">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
+          定时任务
+        </button>
+        <button class="side-row">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M9 6h3a3 3 0 0 1 3 3v0M9 18h3a3 3 0 0 0 3-3v0"/></svg>
+          工作流
+        </button>
+        <button class="side-row">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          搜索会话
+        </button>
+      </div>
+
+      <div class="side-group-label">今天</div>
+      <button class="side-item is-active">
+        <span class="side-item-text">GB/T 14405 与 GB/T 3811 主要指标对比</span>
+        <span class="side-item-star">★</span>
+      </button>
+      <button class="side-item">
+        <span class="side-item-text">钢筋保护层厚度验收允许偏差查询</span>
+      </button>
+
+      <div class="side-group-label">昨天</div>
+      <button class="side-item">
+        <span class="side-item-text">GB/T 19001-2016 与 ISO 9001 差异点</span>
+      </button>
+      <button class="side-item">
+        <span class="side-item-text">城市快速路桥梁定期检查频次</span>
+      </button>
+      <button class="side-item">
+        <span class="side-item-text">混凝土术语条目去重核查</span>
+      </button>
+
+      <div class="side-group-label">近 7 天</div>
+      <button class="side-item">
+        <span class="side-item-text">塔式起重机风载荷计算标准依据</span>
+      </button>
+      <button class="side-item">
+        <span class="side-item-text">GB 50010-2010 强制性条文整理</span>
+      </button>
+      <button class="side-item">
+        <span class="side-item-text">钢结构焊缝质量等级选用</span>
+      </button>
+    </div>
+
+    <!-- Kimi「邀请有奖」位 → 今日简报灰卡 -->
+    <button class="side-brief">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3a6 6 0 0 1 3.6 10.8c-.7.6-1.1 1.3-1.3 2.2h-4.6c-.2-.9-.6-1.6-1.3-2.2A6 6 0 0 1 12 3Z"/><path d="M10 19h4m-3 3h2"/></svg>
+      <span>
+        <span class="side-brief-t">今日简报</span>
+        <div class="side-brief-s">AI 已整理 12 条行业动态</div>
+      </span>
+      <span class="side-brief-arrow">›</span>
+    </button>
+
+    <!-- 底部用户行 -->
+    <div class="side-foot">
+      <button class="side-user" id="userMenuBtn">
+        <span class="side-user-avatar">诺</span>
+        <span class="side-user-name">工程师老诺</span>
+        <span class="chip-mini">超管</span>
+        <span class="side-user-dl">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        </span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ══════════ 主栏 ══════════ -->
+  <main class="main">
+
+    <header class="topbar" id="topbar">
+      <span class="tb-title" id="tbTitle">新对话</span>
+      <div class="tb-spacer"></div>
+      <div class="seg" id="viewSeg">
+        <button class="seg-btn on" data-view="welcome">首屏</button>
+        <button class="seg-btn" data-view="chat">会话</button>
+      </div>
+      <button class="tb-iconbtn" title="沉淀入库">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+      </button>
+      <div class="seg" id="themeSeg">
+        <button class="seg-btn" data-theme-pick="glass">玻璃</button>
+        <button class="seg-btn on" data-theme-pick="kimi">Kimi</button>
+      </div>
+    </header>
+
+    <div class="stage">
+
+      <!-- ═══ 首屏 ═══ -->
+      <section class="welcome fade-slide" id="viewWelcome">
+
+        <!-- 唯一彩色 pill -->
+        <button class="blue-pill">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 4v12m0 0-3-3m3 3 3-3M17 20V8m0 0-3 3m3-3 3 3"/></svg>
+          今日简报已生成
+        </button>
+
+        <!-- 品牌 wordmark -->
+        <div class="wordmark">
+          <div class="wordmark-main">同道</div>
+          <div class="wordmark-sub">标准 AI 助理 · KNOWLEDGE BASE AGENT</div>
+        </div>
+
+        <!-- 大输入框 + 下叠灰带 -->
+        <div class="composer-hero">
+          <div class="composer">
+            <textarea class="composer-input" id="composerInput" placeholder='输入 "/" 唤起技能' rows="1"></textarea>
+            <div class="composer-bar">
+              <button class="cp-plus" title="添加附件">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <div class="cp-spacer"></div>
+              <button class="cp-mode" title="切换思考模式">
+                <b>快速</b>
+                <span>深度</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <button class="cp-send" id="sendBtn" title="发送">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="composer-band">
+            <button class="band-btn">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+              标准池：全量
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 功能 pill 一排 -->
+        <div class="pill-row">
+          <button class="pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>标准检索</button>
+          <button class="pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5M3 12h18"/></svg>指标对比</button>
+          <button class="pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>查重检测</button>
+          <button class="pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5 15.5 15.5"/></svg>对象关系</button>
+          <button class="pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m12 3 2.1 4.9L19 10l-4.9 2.1L12 17l-2.1-4.9L5 10l4.9-2.1Z"/><path d="M19 17v4m-2-2h4"/></svg>标准评估</button>
+          <button class="pill"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5V3m8 2V3"/></svg>技能广场</button>
+        </div>
+
+        <!-- 案例网格（探索展开） -->
+        <div class="case-grid" id="caseGrid" hidden>
+          <article class="case-card">
+            <div class="case-card-head"><span class="case-card-name">标准检索</span><span class="case-card-skill">@std-query</span></div>
+            <p class="case-card-desc">按标准号、名称或适用范围查询标准元数据、现行状态与替代关系。</p>
+            <div class="case-card-foot"><span><b>12</b> 个案例</span><span>试一试 ↗</span></div>
+          </article>
+          <article class="case-card">
+            <div class="case-card-head"><span class="case-card-name">指标对比</span><span class="case-card-skill">@indicator-compare</span></div>
+            <p class="case-card-desc">对两份标准的技术指标做逐项交叉对比，输出差异清单与依据章节。</p>
+            <div class="case-card-foot"><span><b>8</b> 个案例</span><span>试一试 ↗</span></div>
+          </article>
+          <article class="case-card">
+            <div class="case-card-head"><span class="case-card-name">查重检测</span><span class="case-card-skill">@dedupe</span></div>
+            <p class="case-card-desc">批量检测标准池内条目重复情况，生成去重建议与合并依据。</p>
+            <div class="case-card-foot"><span><b>5</b> 个案例</span><span>试一试 ↗</span></div>
+          </article>
+          <article class="case-card">
+            <div class="case-card-head"><span class="case-card-name">对象关系</span><span class="case-card-skill">@obj-rel</span></div>
+            <p class="case-card-desc">推断标准对象之间的包含、细分、配套关系，输出置信度。</p>
+            <div class="case-card-foot"><span><b>6</b> 个案例</span><span>试一试 ↗</span></div>
+          </article>
+          <article class="case-card">
+            <div class="case-card-head"><span class="case-card-name">标准评估</span><span class="case-card-skill">@evaluate</span></div>
+            <p class="case-card-desc">对标准现行状态与适用性做结构化评估，给出修订或废止建议。</p>
+            <div class="case-card-foot"><span><b>4</b> 个案例</span><span>试一试 ↗</span></div>
+          </article>
+          <article class="case-card">
+            <div class="case-card-head"><span class="case-card-name">每日简报</span><span class="case-card-skill">@daily-brief</span></div>
+            <p class="case-card-desc">每天早晨汇总政策动态与行业要闻，生成一页式今日简报。</p>
+            <div class="case-card-foot"><span><b>3</b> 个案例</span><span>试一试 ↗</span></div>
+          </article>
+        </div>
+
+        <!-- 底部探索卡 -->
+        <button class="explore-card" id="exploreCard">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3a6 6 0 0 1 3.6 10.8c-.7.6-1.1 1.3-1.3 2.2h-4.6c-.2-.9-.6-1.6-1.3-2.2A6 6 0 0 1 12 3Z"/><path d="M10 19h4m-3 3h2"/></svg>
+          探索案例
+          <span class="explore-right">滑动探索
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 15 6-6 6 6"/></svg>
+          </span>
+        </button>
+      </section>
+
+      <!-- ═══ 会话流 ═══ -->
+      <section class="chat" id="viewChat" hidden>
+        <div class="chat-inner">
+
+          <div class="msg-user">
+            <div class="msg-user-bubble">对比 GB/T 14405-2011《通用桥式起重机》和 GB/T 3811-2008《起重机设计规范》的主要技术指标，输出差异点。</div>
+          </div>
+
+          <div class="msg-ai">
+            <div class="msg-ai-body">
+              <div class="msg-ai-content">
+                <p>已完成两份标准的交叉比对。两者定位不同：<strong>GB/T 14405 是产品标准</strong>，规定通用桥式起重机的具体参数与要求；<strong>GB/T 3811 是设计基础规范</strong>，给出通用设计方法与载荷模型。主要差异集中在以下三处：</p>
+                <ul>
+                  <li><strong>工作级别划分</strong> — 14405 按整机划分 A1～A8，3811 要求结构件与机构分别按 U（利用等级）/Q（载荷状态）评定；</li>
+                  <li><strong>主梁上拱度</strong> — 14405 规定跨中上拱度为 S/1000，3811 只给出刚度通用判据，不做具体限值；</li>
+                  <li><strong>安全系数</strong> — 3811 采用分项系数法（载荷系数 1.1～1.5），14405 引用其结果并补充整机型式试验要求。</li>
+                </ul>
+                <table class="msg-table">
+                  <thead>
+                    <tr><th>对比项</th><th>GB/T 14405-2011</th><th>GB/T 3811-2008</th><th>结论</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>性质</td><td>产品标准</td><td>设计规范</td><td>互补引用</td></tr>
+                    <tr><td>主梁上拱度</td><td>S/1000（明确限值）</td><td>无具体限值</td><td>以 14405 为准</td></tr>
+                    <tr><td>工作级别</td><td>整机 A1～A8</td><td>结构/机构分别评定</td><td>3811 更细</td></tr>
+                  </tbody>
+                </table>
+                <div class="msg-sources">
+                  <span class="msg-src">GB/T 14405-2011 §5.2 主梁</span>
+                  <span class="msg-src">GB/T 3811-2008 §4.3 载荷与载荷效应</span>
+                  <span class="msg-src">GB/T 3811-2008 §6.1 工作级别</span>
+                </div>
+              </div>
+              <div class="msg-ai-actions">
+                <button class="msg-act">⧉ 复制</button>
+                <button class="msg-act">↻ 重新生成</button>
+                <button class="msg-act">↓ 沉淀入库</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="msg-ai">
+            <div class="msg-ai-body">
+              <div class="msg-thinking">
+                正在检索相关章节
+                <span class="msg-thinking-dots"><i></i><i></i><i></i></span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </div>
+
+    <!-- 会话态输入框 -->
+    <div class="composer-chat" id="composerChat" hidden>
+      <div class="composer-hero">
+        <div class="composer">
+          <textarea class="composer-input" id="composerInputChat" placeholder='输入 "/" 唤起技能' rows="1"></textarea>
+          <div class="composer-bar">
+            <button class="cp-plus" title="添加附件">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <div class="cp-spacer"></div>
+            <button class="cp-mode"><b>快速</b><span>深度</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <button class="cp-send" id="sendBtnChat" title="发送">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5m0 0-6 6m6-6 6 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer-wrap-hero"></div>
+  </main>
+
+  <!-- ══════════ 用户菜单弹层 ══════════ -->
+  <div class="pop-anchor">
+    <div class="user-pop" id="userPop">
+      <div class="up-head">
+        <span class="up-avatar">诺</span>
+        <div>
+          <div class="up-name">工程师老诺</div>
+          <div class="up-sub">@laonuo</div>
+        </div>
+      </div>
+      <div class="up-divider"></div>
+
+      <button class="up-row">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        编辑个人资料
+      </button>
+
+      <div class="up-row up-row--switch">
+        <span class="up-label">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8m-2 6h8"/></svg>
+          启用今日简报
+        </span>
+        <label class="switch">
+          <input type="checkbox" checked />
+          <span class="switch-track"></span>
+          <span class="switch-thumb"></span>
+        </label>
+      </div>
+
+      <div class="up-divider"></div>
+
+      <!-- ★ 主题风格（真实落地时放 QAUserMenu 此位置） -->
+      <div class="up-row" style="cursor:default; padding-bottom:5px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18c-1.5 0-2-1-1.5-2.5S9 16 8 16a3 3 0 0 1-3-3"/></svg>
+        主题风格
+      </div>
+      <div class="up-theme-seg" id="popThemeSeg">
+        <button class="up-theme-btn" data-theme-pick="glass">极光玻璃</button>
+        <button class="up-theme-btn on" data-theme-pick="kimi">Kimi</button>
+      </div>
+
+      <div class="up-divider"></div>
+      <button class="up-row up-row--danger">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        退出登录
+      </button>
+    </div>
+  </div>
+
+  <div class="preview-note">
+    <b>样张说明</b> · 严格参照 www.kimi.com 截图：灰白双色底、黑方圆 logo、白色新建会话卡(Ctrl K)、wordmark + 大输入框主角、pill 功能排、圆形发送钮、唯一浅蓝 pill。顶栏可对照「玻璃」旧主题；左下用户菜单内是未来真实的主题切换入口。
+  </div>
+</div>
+
+<script>
+(function () {
+  var shell = document.getElementById('shell');
+
+  /* 主题切换（顶栏 + 用户弹层两处同步） */
+  function setTheme(theme) {
+    shell.dataset.theme = theme;
+    document.querySelectorAll('[data-theme-pick]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.dataset.themePick === theme);
+    });
+  }
+  document.querySelectorAll('[data-theme-pick]').forEach(function (btn) {
+    btn.addEventListener('click', function () { setTheme(btn.dataset.themePick); });
+  });
+
+  /* 视图切换 */
+  var viewWelcome = document.getElementById('viewWelcome');
+  var viewChat = document.getElementById('viewChat');
+  var composerChat = document.getElementById('composerChat');
+  var topbar = document.getElementById('topbar');
+  var tbTitle = document.getElementById('tbTitle');
+  document.querySelectorAll('#viewSeg .seg-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('#viewSeg .seg-btn').forEach(function (b) { b.classList.remove('on'); });
+      btn.classList.add('on');
+      var isChat = btn.dataset.view === 'chat';
+      viewWelcome.hidden = isChat;
+      viewChat.hidden = !isChat;
+      composerChat.hidden = !isChat;
+      topbar.classList.toggle('in-chat', isChat);
+      tbTitle.textContent = isChat ? 'GB/T 14405 与 GB/T 3811 主要指标对比' : '新对话';
+      var target = isChat ? viewChat : viewWelcome;
+      target.classList.remove('fade-slide');
+      void target.offsetWidth;
+      target.classList.add('fade-slide');
+    });
+  });
+
+  /* 探索案例展开 */
+  var exploreCard = document.getElementById('exploreCard');
+  var caseGrid = document.getElementById('caseGrid');
+  exploreCard.addEventListener('click', function () {
+    caseGrid.hidden = !caseGrid.hidden;
+    exploreCard.classList.toggle('open', !caseGrid.hidden);
+    if (!caseGrid.hidden) {
+      caseGrid.classList.remove('fade-slide');
+      void caseGrid.offsetWidth;
+      caseGrid.classList.add('fade-slide');
+    }
+  });
+
+  /* 用户菜单弹层 */
+  var pop = document.getElementById('userPop');
+  document.getElementById('userMenuBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    pop.classList.toggle('open');
+  });
+  document.addEventListener('click', function () { pop.classList.remove('open'); });
+  pop.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  /* 输入框：自适应高度 + 发送钮灰黑态 + Enter 发送 */
+  function bindComposer(inputId, sendId) {
+    var input = document.getElementById(inputId);
+    var send = document.getElementById(sendId);
+    input.addEventListener('input', function () {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 220) + 'px';
+      send.classList.toggle('on', input.value.trim().length > 0);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(input, send); }
+    });
+    send.addEventListener('click', function () { doSend(input, send); });
+  }
+  bindComposer('composerInput', 'sendBtn');
+  bindComposer('composerInputChat', 'sendBtnChat');
+
+  function doSend(input, send) {
+    var text = input.value.trim();
+    if (!text) return;
+    var chatBtn = document.querySelector('#viewSeg .seg-btn[data-view="chat"]');
+    chatBtn.click();
+    var inner = document.querySelector('.chat-inner');
+    var bubble = document.createElement('div');
+    bubble.className = 'msg-user fade-slide';
+    bubble.innerHTML = '<div class="msg-user-bubble"></div>';
+    bubble.querySelector('.msg-user-bubble').textContent = text;
+    inner.appendChild(bubble);
+    input.value = '';
+    input.style.height = 'auto';
+    send.classList.remove('on');
+    var chatEl = document.getElementById('viewChat');
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+})();
+</script>
+</body>
+</html>

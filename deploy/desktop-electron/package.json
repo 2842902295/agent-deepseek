@@ -1,0 +1,19 @@
+{
+  "name": "cesi-desktop-shell",
+  "version": "2.0.0",
+  "description": "桌面单机版 Electron 壳（替代 Edge 应用模式壳，生命周期/托盘/自启全自主管理）",
+  "author": "CESI",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json && electron .",
+    "pack:win": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.0.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,51 @@
+# Electron 壳打包【模板】：${env.*} 只是占位记号，由 pack_desktop.py::_render_electron_builder_yml
+# 渲染成字面值写入 electron-builder.generated.yml，再经 --config 传给 electron-builder。
+# 不依赖运行时 ${env.*} 宏（2026-09 实测踩坑，详见该函数 docstring）：
+#   ① productName 不走宏展开器，字面量漏进 NSIS → makensis warning 6000 当 error，编译失败；
+#   ② extraResources.from 在宏展开前先被相对工程目录 resolve，绝对路径拼成畸形、载荷静默丢失。
+# （手工调试可复制本文件填好值后用 pnpm exec electron-builder --win nsis --config <副本> 试跑）
+appId: com.cesi.agentdeepseek.desktop
+productName: ${env.DESKTOP_APP_NAME}
+
+directories:
+  output: ${env.DESKTOP_OUTPUT_DIR}
+  buildResources: build
+
+# 应用本体 = tsc 产物 + package.json（零运行时依赖）
+files:
+  - dist/main/**/*
+  - package.json
+
+# 暂存应用树整体作为载荷（安装后 = resources/backend/，见 paths.ts 单一出口）；
+# Edge 壳专属文件滤掉（阶段 1 过渡期绿色目录里仍保留它们，由 stage_tree 暂存）
+extraResources:
+  - from: ${env.DESKTOP_STAGE_DIR}
+    to: backend
+    filter:
+      - "**/*"
+      - "!launcher.pyw"
+      - "!launcher.vbs"
+      - "!stop.pyw"
+
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+
+nsis:
+  # 对齐 installer.iss 全部能力：用户级安装、可改目录、桌面/开始菜单快捷方式、装完启动
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ${env.DESKTOP_APP_NAME}
+  runAfterFinish: true
+  # 中文单一向导（与旧 Inno 安装包口径一致）：electron-builder 自带 messages.yml /
+  # assistedMessages.yml 的完整 zh_CN 翻译；不要手写 !insertmacro MUI_LANGUAGE
+  # （addLangs 宏会重复插入导致 NSIS 编译报错，源码级核实 2026-09）
+  installerLanguages:
+    - zh_CN
+
+# 中间产物带构建戳（pack_desktop.py 会重命名为 <应用名>安装包-<戳>.exe 对齐现有命名）
+artifactName: ${env.DESKTOP_APP_NAME}-${env.DESKTOP_BUILD_VERSION}.${ext}

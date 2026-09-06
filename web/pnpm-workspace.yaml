@@ -1,0 +1,16 @@
+packages:
+  - 'packages/*'
+allowBuilds:
+  '@parcel/watcher': true
+  '@vue-office/docx': true
+  '@vue-office/excel': true
+  '@vue-office/pdf': true
+  '@vue-office/pptx': true
+  core-js: true
+  core-js-pure: true
+  es5-ext: true
+  esbuild: true
+  simple-git-hooks: true
+  typeit: true
+  unrs-resolver: true
+  vue-demi: true

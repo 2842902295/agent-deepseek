@@ -1,0 +1,53 @@
+# 桌面瘦包依赖剔除名单（按 pip 包名匹配，不区分大小写；支持 `前缀*` 通配）
+# 主剔除：体积大头（torch 及其拖入的 NVIDIA CUDA 运行库）。核心版 app/ 从不 import 这些。
+torch
+sentence-transformers
+triton
+nvidia-*
+# litellm：app/ 全量 grep 零引用（2026-08-11 确认），37MB 死重。langchain 对其为可选 lazy import。
+# litellm-proxy-extras 是它的卫星包，litellm 被剔后同样成孤儿。
+litellm
+litellm-proxy-extras
+
+# ── 孤儿依赖链（2026-08-12 排查安装慢时补齐）────────────────────────────
+# filter_requirements 只剔名单上的包，被剔包的"专属依赖"会留在闭包里照装，
+# 以下全是已剔包拖入、app/ 零引用的孤儿（均逐个验证过反向依赖）：
+
+# crawl4ai（次级剔除）专属链：nltk/alphashape/shapely/scipy 只有 crawl4ai 在用
+nltk
+alphashape
+shapely
+scipy
+
+# onnxruntime 链：pyseekdb 的可选依赖（find_spec 守卫，本地 embedding 才用；
+# 桌面版走 web-embed 不需要）；sympy/mpmath/networkx 是它的专属依赖
+onnxruntime
+sympy
+mpmath
+networkx
+
+# google 全家桶：langchain-google-genai 与 langextract 的 gemini_batch 拖入。
+# gemini_batch 在 langextract 内是懒加载（仅 GCS 批处理用），桌面版用不到；
+# 剔除后 langextract 的 gs:// 输出路径在桌面版不可用，核心提取功能不受影响。
+# protobuf/pyasn1* 的引用方恰好全在本链上（验证过 pdm.lock 反向依赖）。
+google-genai
+google-api-core
+google-auth
+google-cloud-core
+google-cloud-storage
+google-crc32c
+google-resumable-media
+googleapis-common-protos
+langchain-google-genai
+proto-plus
+protobuf
+pyasn1
+pyasn1-modules
+
+# [secondary] 次级剔除：浏览器自动化栈（核心版不用）。选"剔除次级"时一并剔除，
+# 会使浏览器自动化类 skill 在桌面版不可用（有意裁剪）。
+[secondary]
+crawl4ai
+playwright
+playwright-stealth
+patchright

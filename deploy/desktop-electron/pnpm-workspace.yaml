@@ -1,0 +1,4 @@
+# 独立 pnpm 工程根。electron-winstaller 是 electron-builder 的 squirrel 目标传递依赖，
+# 我们只走 NSIS，其 postinstall（下载 Squirrel 二进制）不允许执行。
+allowBuilds:
+  electron-winstaller: false

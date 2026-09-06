@@ -1,0 +1,127 @@
+/* ============================================================
+   naive-ui 浮层外观统一 —— Message（主）+ Dialog（卡面）
+   ------------------------------------------------------------
+   方案：极简白卡（与 qa-glass 的 kimi 主题同源，样张 B）
+     · 大圆角 + 发丝边 + 分层弱阴影
+     · 图标收进语义色圆角底块（chip），图标本身为线性描边（镂空）
+     · 语义色不硬编码：chip 底色与图标色都由 naive 自己的 --n-icon-color-*
+       派生，因此「主题抽屉里改 success/error 配色」与「切换深色模式」
+       都自动跟随，不需要在这里维护第二套色板。
+
+   职责划分：
+     · 尺寸类（圆角 / 内边距 / 最大宽度 / 堆叠间距）走 themeOverrides.Message
+       —— 见 store/modules/theme/shared.ts::getNaiveTheme()，官方通道无优先级问题。
+     · 结构性效果（图标底块 + 镂空图标重绘）与需要分明暗的描边、阴影放这里。
+
+   优先级说明：naive 的样式是运行时 CSS-in-JS 注入 <head> 的，出现在本文件之后，
+     同等优先级它会赢。所以这里统一用 `.n-message-container .n-message` 这类
+     祖先选择器抬一级，避免 !important。
+   ============================================================ */
+
+:root {
+  --ov-hairline: rgba(31, 32, 36, 0.07);
+  --ov-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 12px 30px -14px rgba(0, 0, 0, 0.16);
+}
+
+html.dark {
+  --ov-hairline: rgba(255, 255, 255, 0.09);
+  --ov-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 14px 34px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* ══════════════════════════════════════════════
+   Message
+   ══════════════════════════════════════════════ */
+
+/* 卡面：发丝边 + 分层阴影 + 字重
+   （底色与文字色沿用 naive 的 --n-color / --n-text-color，明暗自适应） */
+.n-message-container .n-message {
+  border: 1px solid var(--ov-hairline);
+  box-shadow: var(--ov-shadow);
+  font-weight: 500;
+}
+
+/* 每条消息的强调色 = naive 按类型给出的图标色，chip 底色与图标色均由它派生。
+   注：naive 不输出 --n-icon-color-default（default 类型本身也不渲染图标），
+   这里的兜底只是防御，正常不会命中。
+   --msg-glyph 是镂空描边图标的 mask 源（data URI），与样张 B 的线性图标同款。 */
+.n-message-container .n-message {
+  --msg-accent: var(--n-icon-color-default, #7e7f86);
+  --msg-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.2'/%3E%3C/svg%3E");
+}
+.n-message-container .n-message--info-type {
+  --msg-accent: var(--n-icon-color-info, #3d7bf6);
+  --msg-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9.2'/%3E%3Cpath d='M12 11.1v5.3'/%3E%3Ccircle cx='12' cy='7.9' r='1' fill='%23000' stroke='none'/%3E%3C/svg%3E");
+}
+.n-message-container .n-message--success-type {
+  --msg-accent: var(--n-icon-color-success, #16a34a);
+  --msg-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.2'/%3E%3Cpath d='M8 12.4l2.7 2.7L16 9.7'/%3E%3C/svg%3E");
+}
+.n-message-container .n-message--warning-type {
+  --msg-accent: var(--n-icon-color-warning, #f5a524);
+  --msg-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.9L21 19.4H3L12 3.9z'/%3E%3Cpath d='M12 9.6v4'/%3E%3Ccircle cx='12' cy='16.5' r='1' fill='%23000' stroke='none'/%3E%3C/svg%3E");
+}
+.n-message-container .n-message--error-type {
+  --msg-accent: var(--n-icon-color-error, #e5484d);
+  --msg-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.9' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9.2'/%3E%3Cpath d='M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6'/%3E%3C/svg%3E");
+}
+.n-message-container .n-message--loading-type {
+  --msg-accent: var(--n-icon-color-loading, #3d7bf6);
+  --msg-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.1' stroke-linecap='round'%3E%3Cpath d='M12 3.2a8.8 8.8 0 1 1-8.8 8.8'/%3E%3C/svg%3E");
+}
+
+/* 图标底块：把 naive 的图标盒撑成 26px 圆角方块并垫上语义色浅底。 */
+.n-message-container .n-message__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  /* color-mix 不可用时的中性兜底（老内核降级为灰底块，不影响可读性） */
+  background: rgba(127, 127, 127, 0.12);
+  background: color-mix(in srgb, var(--msg-accent) 10%, transparent);
+}
+html.dark .n-message-container .n-message__icon {
+  background: color-mix(in srgb, var(--msg-accent) 18%, transparent);
+}
+
+/* naive 出厂图标是「实心圆 + 挖空符号」，与样张的线性描边不符。
+   隐藏原生 svg，用 ::after + mask 重画镂空图标：图形由 mask 的透明通道提供，
+   颜色由 background 承接 → 图标色自动跟随 --msg-accent（主题色 + 明暗）。 */
+.n-message-container .n-message__icon > * {
+  display: none;
+}
+.n-message-container .n-message__icon::after {
+  content: '';
+  width: 17px;
+  height: 17px;
+  background: var(--msg-accent);
+  -webkit-mask: var(--msg-glyph) center / contain no-repeat;
+  mask: var(--msg-glyph) center / contain no-repeat;
+}
+
+/* loading 型保留转圈语义 */
+.n-message-container .n-message--loading-type .n-message__icon::after {
+  animation: ov-msg-spin 0.9s linear infinite;
+}
+@keyframes ov-msg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ══════════════════════════════════════════════
+   Dialog —— 只做卡面同款处理（圆角 / 发丝边 / 阴影）
+   图标不动：dialog 的图标定位由 iconPlacement（left/top）分支控制，
+   加底块需重排标题与正文的缩进，收益低风险高，保持 naive 原样。
+   naive 自身不给 .n-dialog 任何阴影，以下均为纯新增属性。
+   ══════════════════════════════════════════════ */
+
+.n-dialog {
+  border: 1px solid var(--ov-hairline);
+  box-shadow: var(--ov-shadow);
+}

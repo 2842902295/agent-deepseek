@@ -1,0 +1,94 @@
+services:
+  nginx:
+    # 前端由打包脚本在本地预构建（pack_deploy.py 内 pnpm build，web/dist 随包分发），
+    # 服务器零 node 编译：静态文件直接挂载，前端更新无需重建/重启 nginx
+    # ⚠️ 固定版本，勿改回浮动 tag nginx:alpine —— 1.31.3 起在老内核服务器
+    # （CentOS 7 / kernel 3.10）上启动即崩：pwrite() "/run/nginx.pid" failed
+    # (1: Operation not permitted)，见 nginx/docker-nginx#1059；1.31.2-alpine 正常
+    image: nginx:1.31.2-alpine
+    ports:
+      - "1880:80"
+    volumes:
+      - ./web/dist:/var/www/html/fast-soy-admin:ro
+      - ./deploy/web.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      app:
+        condition: service_started
+    restart: always
+    networks:
+      - internal
+    environment:
+      - TZ=Asia/Shanghai
+
+
+  app:
+    # app 与 cron_reset 共用同一镜像（同名 image: compose 只构建一次，避免重复构建/双份占盘）；
+    # 与离线打包 pack_deploy_offline.py 的 APP_IMAGE 同名，两种部署方式可互相复用镜像
+    image: cesi-fast-admin-app:latest
+    build:
+      context: .
+      dockerfile: deploy/app.Dockerfile
+    ports:
+      - "9999:9999"
+    working_dir: /opt/fast-soy-admin
+    # browser-use / Chromium 的 sandbox 需要 SYS_ADMIN 创建 namespace，否则浏览器进程 fork 后挂死超时；
+    # 容器 /dev/shm 默认仅 64MB，Chromium 共享内存不足会崩溃，显式扩到 512mb
+    cap_add:
+      - SYS_ADMIN
+    shm_size: 512mb
+    # 依赖已烘焙进镜像（deploy/app.Dockerfile），启动直接跑 CMD；
+    # 纯代码更新 docker compose restart app 即可，依赖变更才需重建镜像
+    environment:
+      - LANG=zh_CN.UTF-8
+      - ENV_FILE=.env.prod
+      - TZ=Asia/Shanghai
+    env_file:
+      - .env.prod
+    volumes:
+      - .:/opt/fast-soy-admin
+    networks:
+      - internal
+    restart: always
+
+  redis:
+    image: redis:latest
+    networks:
+      - internal
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - redis_data:/data
+
+  # Optional: run with `docker compose --profile cron up -d`
+  # View logs: `docker compose --profile cron logs -f cron_reset`
+  cron_reset:
+    image: cesi-fast-admin-app:latest  # 复用 app 的镜像，compose 只构建一次
+    build:
+      context: .
+      dockerfile: deploy/app.Dockerfile
+    command: ["python", "cron_reset.py"]
+    depends_on:
+      - app
+    restart: unless-stopped
+    profiles:
+      - cron
+    networks:
+      - internal
+    # 镜像不含源码，与 app 一样挂载项目目录（cron_reset.py 依赖 app 包）
+    volumes:
+      - .:/opt/fast-soy-admin
+    # 与 app 服务同一配置来源（容器内无 dotenv 文件，env_file 注入的环境变量生效）
+    environment:
+      - TZ=Asia/Shanghai
+      - ENV_FILE=.env.prod
+    env_file:
+      - .env.prod
+
+volumes:
+  redis_data:
+
+networks:
+  internal:
+    driver: bridge
