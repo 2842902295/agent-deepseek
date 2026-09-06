@@ -52,6 +52,11 @@ _IMAGE_PRIME_MAX_BYTES = 20 * 1024 * 1024
 # 活跃任务取消令牌：session_key -> asyncio.Event（用于停止后台任务）
 _active_task_cancellations: dict[str, asyncio.Event] = {}
 
+# 后台回合 task 的强引用表：asyncio 只在事件循环里持弱引用，create_task 后不存
+# 结果的 task 可能被 GC 中途回收（官方文档明确警告）。回合 task 生命周期长达
+# 数十分钟，绝不能冒这个险——启动时 add，done 回调自动 discard。
+_background_tasks: set[asyncio.Task] = set()
+
 # ── Workspace 与 Skill 路径 ───────────────────────────────────────────────────
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
@@ -552,7 +557,7 @@ async def _prewarm_loop(uid: int, gen: int) -> None:
                 logger.info(f"[perf] agent 预热完成 uid={uid} session={session_key} 耗时 {dt:.0f}ms")
                 return
             # 预热期间用户又切换了：刚建的形态已陈旧。无在途回合时弹出全部形态
-            #（陈旧 dsh 子进程随之关闭）；有在途回合则跳过——evict 的 close 会杀掉
+            # （陈旧 dsh 子进程随之关闭）；有在途回合则跳过——evict 的 close 会杀掉
             # 回合正在使用的运行时，孤儿形态留给下次切换/LRU 回收
             _busy = False
             try:
@@ -670,9 +675,7 @@ async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
                         pass
             await _run_skill_sync(ws, user_id, _tier_codes, session_expert)
         elif _bg is None or _bg.done():
-            _skill_sync_tasks[str(ws)] = asyncio.create_task(
-                _run_skill_sync(ws, user_id, _tier_codes, session_expert, delay=_BG_SYNC_DELAY)
-            )
+            _skill_sync_tasks[str(ws)] = asyncio.create_task(_run_skill_sync(ws, user_id, _tier_codes, session_expert, delay=_BG_SYNC_DELAY))
 
     # 按角色模型配置 profile 解析，放在缓存查找之前（角色预取已上移到函数开头）：
     # - profile 编进 cache_key（配置 / 角色变化 → key 变 → agent 自动重建对应形态）
@@ -698,9 +701,7 @@ async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
 
         from app.langchain.config import chat_block_supports_vision
 
-        _profile = dataclasses.replace(
-            _profile, chat_block_key=_mode_block, supports_vision=chat_block_supports_vision(_mode_block)
-        )
+        _profile = dataclasses.replace(_profile, chat_block_key=_mode_block, supports_vision=chat_block_supports_vision(_mode_block))
 
     set_current_profile(_profile)
     apply_gen_override(_profile)
@@ -709,9 +710,7 @@ async def _get_agent_for_session(session_key: str, user_id: Optional[int]):
         from app.core.ctx import CTX_GEN_BLOCK_OVERRIDE
         from app.mcp_bridge.dsh_http_bridge import register_turn_defaults
 
-        register_turn_defaults(
-            user_id, is_super=_is_super, is_admin=_is_admin, gen_override=CTX_GEN_BLOCK_OVERRIDE.get()
-        )
+        register_turn_defaults(user_id, is_super=_is_super, is_admin=_is_admin, gen_override=CTX_GEN_BLOCK_OVERRIDE.get())
     except Exception as _e:  # noqa: BLE001
         logger.warning(f"[qa] register_turn_defaults 失败（忽略）: {_e}")
 
@@ -905,10 +904,12 @@ async def _describe_one_image(llm, abs_path: Path) -> str:
     mime = mimetypes.guess_type(abs_path.name)[0] or "image/png"
     # PIL 缩放是 CPU 密集，必须丢线程池（复用 vision_tools 的缩放逻辑）
     data, mime = await asyncio.to_thread(_maybe_resize_sync, data, mime)
-    msg = HumanMessage(content=[
-        {"type": "text", "text": _IMAGE_PRIME_PROMPT},
-        {"type": "image_url", "image_url": {"url": _to_data_url(data, mime)}},
-    ])
+    msg = HumanMessage(
+        content=[
+            {"type": "text", "text": _IMAGE_PRIME_PROMPT},
+            {"type": "image_url", "image_url": {"url": _to_data_url(data, mime)}},
+        ]
+    )
     resp = await asyncio.wait_for(llm.ainvoke([msg]), timeout=_IMAGE_PRIME_TIMEOUT_S)
     content = resp.content if isinstance(resp.content, str) else str(resp.content)
     if not content.strip():
@@ -951,10 +952,7 @@ async def _prime_image_descriptions(request, workspace: Path) -> str:
             blocks.append(f"图片：{rel}\n（预解读失败，无法查看该图内容，请向用户如实说明）")
         else:
             blocks.append(f"图片：{rel}\n内容描述：\n{res}")
-    return (
-        "[用户上传的图片已由多模态模型预解读，内容描述如下，直接使用即可；"
-        "回复中提及图片时用文件名指代；若描述信息不够、需要核对细节，可再用 read_image 工具直接查看原图]\n" + "\n\n".join(blocks)
-    )
+    return "[用户上传的图片已由多模态模型预解读，内容描述如下，直接使用即可；回复中提及图片时用文件名指代；若描述信息不够、需要核对细节，可再用 read_image 工具直接查看原图]\n" + "\n\n".join(blocks)
 
 
 # ── 交互式问卷解析 ────────────────────────────────────────────────────────────
@@ -1032,6 +1030,47 @@ def _parse_questionnaire(body: str) -> Optional[dict]:
             "options": opts,
         })
     return {"questions": cleaned}
+
+
+async def _save_msg_resilient(
+    msg: AgentMessage,
+    *,
+    update_fields: Optional[list[str]] = None,
+    attempts: int = 3,
+    delay: float = 0.4,
+    what: str = "",
+) -> bool:
+    """消息落库的连接瞬断重试（修复「一次 2013 杀死整个回合」）。
+
+    高思考强度长回合期间，到内网 OceanBase 的空闲连接可能被中间设备回收
+    （日志实证：UPDATE agent_message 中途 2013 Lost connection，2026-09-04 单日 46 次），
+    旧实现异常直接穿透 astream 消费循环 → 整个回合被中止（LLM 明明还在正常输出）。
+    OperationalError（2013/2006/2003 均归入此类）指数退避重试；非连接类错误不重试。
+    最终失败返回 False 不抛异常——进度落库本就是尽力而为，不能拖垮回合；
+    调用方对终态落库失败仅告警（前端已有全量内容，刷新/回放可纠偏）。
+    """
+    from tortoise.exceptions import OperationalError
+
+    last: Optional[Exception] = None
+    for i in range(attempts):
+        try:
+            if update_fields:
+                await msg.save(update_fields=update_fields)
+            else:
+                await msg.save()
+            if i:
+                logger.info(f"[db-resilient] {what or 'save'} 第 {i + 1} 次重试成功 msg_id={msg.id}")
+            return True
+        except OperationalError as e:
+            last = e
+            logger.warning(f"[db-resilient] {what or 'save'} 连接异常（第 {i + 1}/{attempts} 次）msg_id={msg.id}: {e}")
+            if i < attempts - 1:
+                await asyncio.sleep(delay * (2**i))
+        except Exception as e:  # noqa: BLE001
+            last = e
+            break
+    logger.error(f"[db-resilient] {what or 'save'} 最终失败 msg_id={msg.id}: {last}")
+    return False
 
 
 async def _execute_agent_in_background(
@@ -1149,9 +1188,7 @@ async def _execute_agent_in_background(
             if not _first_process_token:
                 _first_process_token = True
                 logger.info(f"[perf] first process token: {(time.monotonic() - _t_stream_start) * 1000:.0f}ms after astream()")
-            await event_queue.put(
-                _sse({"type": "process", "step": step, "kind": "text", "item_id": item_id, "content": display, "replace": True})
-            )
+            await event_queue.put(_sse({"type": "process", "step": step, "kind": "text", "item_id": item_id, "content": display, "replace": True}))
             await _flush_progress()
 
     async def _flush_reasoning() -> None:
@@ -1180,7 +1217,14 @@ async def _execute_agent_in_background(
         _last_flush = time.monotonic()
         assistant_msg.content = "".join(collected_content).strip()
         assistant_msg.process_json = _persist_process_items()
-        await assistant_msg.save(update_fields=["content", "process_json", "update_time"])
+        # 落库失败不再杀回合（历史 bug：一次 2013 瞬断从 save 穿透 astream 消费循环
+        # → 整个回合中止，LLM 明明还在正常输出）。内存字段已更新，
+        # 下次节流 flush 自然补齐；helper 内部已重试 + 告警。
+        await _save_msg_resilient(
+            assistant_msg,
+            update_fields=["content", "process_json", "update_time"],
+            what="进度落库",
+        )
 
     async def _finalize_aborted() -> None:
         """用户主动停止不算异常：走独立的 aborted 状态，不写 error。
@@ -1196,7 +1240,8 @@ async def _execute_agent_in_background(
             assistant_msg.process_json = _persist_process_items()
             assistant_msg.status = "aborted"
             assistant_msg.error = None
-            await assistant_msg.save()
+            # 终态落库失败也不阻断 aborted 事件（前端已收到全量内容）
+            await _save_msg_resilient(assistant_msg, attempts=5, delay=0.5, what="aborted 落库")
         await event_queue.put(_sse({"type": "aborted"}))
 
     # dsh HTTP 桥回合登记：uid/token 用局部变量持有，收尾清理时原样传回
@@ -1214,7 +1259,7 @@ async def _execute_agent_in_background(
             if assistant_msg is not None:
                 assistant_msg.content = "[内容审核未通过，已拦截]"
                 assistant_msg.status = "done"
-                await assistant_msg.save()
+                await _save_msg_resilient(assistant_msg, what="审核拦截落库")
             await event_queue.put(_sse({"type": "moderated", "message": "内容已被审核拦截"}))
             await event_queue.put(_sse({"type": "done", "steps": 0}))
             await event_queue.put(None)  # 结束标记
@@ -1229,7 +1274,7 @@ async def _execute_agent_in_background(
                 assistant_msg.content = "积分余额不足，请联系管理员充值"
                 assistant_msg.status = "error"
                 assistant_msg.error = "quota_exceeded"
-                await assistant_msg.save()
+                await _save_msg_resilient(assistant_msg, what="quota 落库")
             await event_queue.put(
                 _sse({
                     "type": "quota_exceeded",
@@ -1543,18 +1588,25 @@ async def _execute_agent_in_background(
             assistant_msg.content = final_content
             assistant_msg.process_json = _persist_process_items()
             assistant_msg.status = "done"
-            await assistant_msg.save()
+            # 终态落库放宽重试次数（失败=答案内容丢）；仍失败也不阻断 done 事件——
+            # 前端已有全量内容，DB 不一致由后续消息/刷新回放纠偏
+            await _save_msg_resilient(assistant_msg, attempts=5, delay=0.5, what="终态落库")
 
         await event_queue.put(_sse({"type": "done", "steps": step, "promoted": promoted_ids}))
 
     except Exception as e:
         logger.exception("后台 Agent 执行异常")
         if assistant_msg is not None:
-            assistant_msg.content = "".join(collected_content).strip()
-            assistant_msg.process_json = _persist_process_items()
-            assistant_msg.status = "error"
-            assistant_msg.error = str(e)[:2000]
-            await assistant_msg.save()
+            try:
+                assistant_msg.content = "".join(collected_content).strip()
+                assistant_msg.process_json = _persist_process_items()
+                assistant_msg.status = "error"
+                assistant_msg.error = str(e)[:2000]
+                await _save_msg_resilient(assistant_msg, what="error 落库")
+            except Exception:  # noqa: BLE001
+                # 落库二次异常绝不能吞掉 error 事件的发送——否则前端收不到任何终态
+                # 事件、SSE 干净 EOF，气泡永久停在「生成中」，只能刷新页面（本次事故根因之一）
+                logger.exception("error 落库也失败，跳过落库仅发事件")
         await event_queue.put(_sse({"type": "error", "message": str(e)}))
     finally:
         clear_agent_call_context()
@@ -1845,11 +1897,7 @@ async def qa_chat_stream(request: QARequest):
             file_lines = await asyncio.to_thread(_list_app_files)
             files_desc = "\n".join(file_lines) if file_lines else "（目录为空，请先写入口 index.html）"
             if wf.share_on:
-                _share_desc = (
-                    "已开启·免登录模式（访客全部匿名，whoami 拿不到访客身份）"
-                    if wf.share_public
-                    else "已开启·仅登录用户模式（whoami 可识别访客身份）"
-                )
+                _share_desc = "已开启·免登录模式（访客全部匿名，whoami 拿不到访客身份）" if wf.share_public else "已开启·仅登录用户模式（whoami 可识别访客身份）"
             else:
                 _share_desc = "未开启（访客无法打开；多用户应用需用户在画板顶栏「分享」开启并选「仅登录用户」）"
             html_ctx = (
@@ -1919,9 +1967,7 @@ async def qa_chat_stream(request: QARequest):
                 except Exception as e:  # noqa: BLE001 —— 物化是增强路径，失败保持原行为
                     logger.warning(f"[qa] 应用制作文件物化失败（会话归属板）{_sess_wf.workflow_key}: {e!r}")
             _board_kind = (
-                "应用制作（html 页面型，文件在 apps/<key>/ 目录，改完用 publish_html_board 发布）"
-                if _bt == "html"
-                else "流程编排板（卡片+连线型，用 read_workflow / edit_workflow_board 读写）"
+                "应用制作（html 页面型，文件在 apps/<key>/ 目录，改完用 publish_html_board 发布）" if _bt == "html" else "流程编排板（卡片+连线型，用 read_workflow / edit_workflow_board 读写）"
             )
             agent_input = (
                 "[本会话已归属一块板]\n"
@@ -1956,10 +2002,7 @@ async def qa_chat_stream(request: QARequest):
             elif has_role("VISION"):
                 # 主模型纯文本但配置了 VISION 角色：走 vision_inspect 工具（deepagents 时代的兜底通道）
                 img_list = "\n".join(f"- {f}" for f in image_files)
-                hint_parts.append(
-                    f"[用户上传了 {len(image_files)} 张图片（相对工作目录路径）。当前主模型不支持视觉，"
-                    f"请调用 vision_inspect 工具查看图片内容（传文件路径和想问的问题）]\n{img_list}"
-                )
+                hint_parts.append(f"[用户上传了 {len(image_files)} 张图片（相对工作目录路径）。当前主模型不支持视觉，请调用 vision_inspect 工具查看图片内容（传文件路径和想问的问题）]\n{img_list}")
             else:
                 img_list = "\n".join(f"- {f}" for f in image_files)
                 hint_parts.append(f"[用户上传了以下图片，但当前主模型不支持视觉、无法查看图片内容，请在回复中如实告知用户（不要尝试读取）：]\n{img_list}")
@@ -1988,7 +2031,7 @@ async def qa_chat_stream(request: QARequest):
 
     # 用 asyncio.create_task 立即启动，与 event_generator 并发执行
     # （BackgroundTasks 在 response 结束后才跑，会死锁）
-    asyncio.create_task(
+    _bg_task = asyncio.create_task(
         _execute_agent_in_background(
             agent=agent,
             agent_input=agent_input,
@@ -2004,6 +2047,8 @@ async def qa_chat_stream(request: QARequest):
             timeline_details=timeline_details,
         )
     )
+    _background_tasks.add(_bg_task)
+    _bg_task.add_done_callback(_background_tasks.discard)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         """SSE 事件生成器：从事件队列读取并推送给前端"""
@@ -2251,6 +2296,7 @@ async def daily_brief_stream():
             from app.langchain.chat_mode import resolve_user_chat_pref
 
             _b_mode, _b_block, _b_level = await resolve_user_chat_pref(user_id)
+
             # dsh 内核：brief 专属工具（get_prev_daily_brief 等）暂未接入（阶段 2 走 MCP 桥），
             # 共享资源加载一并跳过，避免构建期外部 MCP 握手阻塞
             def _build():

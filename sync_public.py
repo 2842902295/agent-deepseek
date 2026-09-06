@@ -362,6 +362,31 @@ def mirror(files: list[Path], dry_run: bool) -> tuple[int, int]:
 
 
 # ── git 提交推送 ─────────────────────────────────────────────────────────────
+# 单条通路的推送重试次数（大仓库经本地代理推 GitHub 时中途断流很常见）
+PUSH_RETRIES = 3
+PUSH_RETRY_WAIT = 15
+# 判定为「网络抖动、值得原路重试」的错误特征
+TRANSIENT_ERROR_HINTS = (
+    "RPC failed", "Connection was reset", "Connection reset", "unexpected disconnect",
+    "timed out", "timeout", "Could not resolve host", "Failed to connect", "HTTP/2 stream",
+)
+
+
+def is_transient_network_error(output: str) -> bool:
+    return any(hint.lower() in output.lower() for hint in TRANSIENT_ERROR_HINTS)
+
+
+def remote_matches_local(cfg: list[str]) -> bool:
+    """远端 BRANCH 的 ref 是否与本地一致（区分「真无需推送」与「推送失败但输出含 up-to-date」）。"""
+    try:
+        local = run(["git", "rev-parse", BRANCH], DST).stdout.strip()
+        out = run(["git", *cfg, "ls-remote", "origin", BRANCH], DST, check=False).stdout.strip()
+    except subprocess.CalledProcessError:
+        return False
+    remote = out.split("\t")[0].strip() if out else ""
+    return bool(local) and local == remote
+
+
 def git_push(dry_run: bool, no_push: bool, force: bool, message: str = "") -> None:
     if dry_run:
         return
@@ -410,28 +435,38 @@ def git_push(dry_run: bool, no_push: bool, force: bool, message: str = "") -> No
         return
 
     # 优先走代理推送，失败回退直连（代理节点未连接时直连可能反而通）
+    # http.version=HTTP/1.1：经本地代理推大仓库时 HTTP/2 容易被中途断流（curl 55/56）
     attempts = []
     if GIT_PROXY:
         attempts.append((f"代理 {GIT_PROXY}", ["-c", f"http.proxy={GIT_PROXY}", "-c", f"https.proxy={GIT_PROXY}"]))
     attempts.append(("直连", []))
     for label, cfg in attempts:
-        log(f"[git] 推送（{label}）……")
-        push_cmd = ["git", *cfg, "push"] + (["-f"] if force else []) + ["-u", "origin", BRANCH]
-        r = run(push_cmd, DST, check=False)
-        out = (r.stdout or "") + (r.stderr or "")
-        if "Everything up-to-date" in out:  # 旧 ref 缓存等场景下可能伴随非零返回码，先于成败判断识别
-            log(f"[git] 远端已是最新，无需推送（{label}）")
-            return
-        if r.returncode == 0:
-            log(f"[git] 已推送到 {REMOTE_URL}（{BRANCH}，{label}）")
-            return
-        err = out.strip()
-        log(f"[git] {label}推送失败：{err.splitlines()[-1] if err else '未知错误'}")
-        if "rejected" in err and not force:
-            log("[git] 推送被拒绝（远端有本地没有的提交）。两个选择：")
-            log("      1) 先手动进入目标目录 git pull --rebase 后再跑本脚本；")
-            log("      2) 确认要用本地完全覆盖远端时，重跑并加 --force。")
-            sys.exit(1)
+        cfg = [*cfg, "-c", "http.version=HTTP/1.1", "-c", "http.postBuffer=524288000"]
+        for attempt in range(1, PUSH_RETRIES + 1):
+            log(f"[git] 推送（{label}，第 {attempt}/{PUSH_RETRIES} 次）……")
+            push_cmd = ["git", *cfg, "push"] + (["-f"] if force else []) + ["-u", "origin", BRANCH]
+            r = run(push_cmd, DST, check=False)
+            out = (r.stdout or "") + (r.stderr or "")
+            if r.returncode == 0:
+                log(f"[git] 已推送到 {REMOTE_URL}（{BRANCH}，{label}）")
+                return
+            # 返回码非零时，只有「远端 ref 确实等于本地 ref」才算真的无需推送。
+            # 绝不能只看输出里有没有 Everything up-to-date —— 代理中途断流（curl 55）时
+            # git 也会打印这一行，旧写法会据此误报成功（2026-09-06 实测踩到）。
+            if "Everything up-to-date" in out and remote_matches_local(cfg):
+                log(f"[git] 远端已是最新，无需推送（{label}）")
+                return
+            err = out.strip()
+            log(f"[git] {label}推送失败：{err.splitlines()[-1] if err else '未知错误'}")
+            if "rejected" in err and not force:
+                log("[git] 推送被拒绝（远端有本地没有的提交）。两个选择：")
+                log("      1) 先手动进入目标目录 git pull --rebase 后再跑本脚本；")
+                log("      2) 确认要用本地完全覆盖远端时，重跑并加 --force。")
+                sys.exit(1)
+            if not is_transient_network_error(err) or attempt == PUSH_RETRIES:
+                break
+            log(f"[git] 判定为网络抖动（大仓库经代理常见），{PUSH_RETRY_WAIT}s 后重试……")
+            time.sleep(PUSH_RETRY_WAIT)
     log("[git] 所有推送方式均失败（多为网络无法连通 GitHub：检查代理客户端节点是否已连接，")
     log("      或稍后重试。本地提交已完成，网络恢复后重跑本脚本即可续推，不会重复提交。")
     sys.exit(1)

@@ -110,7 +110,10 @@ class Settings(BaseSettings):
                     # credentials 中除 tortoise 自取字段外的其余参数透传给 aiomysql.create_pool
                     # （见 tortoise/backends/mysql/client.py）。口径对齐 app/services/mysql_pool.py::standard_pool：
                     # - minsize/maxsize：池大小（默认 1/5，业务并发下频繁建连）
-                    # - pool_recycle=3600：连接超过 1 小时强制重建，规避服务端空闲超时后的半死连接
+                    # - pool_recycle=300：连接超过 5 分钟强制重建，规避服务端/中间设备
+                    #   空闲回收后的半死连接（原 3600 太长：长回合静默期池内连接被杀，
+                    #   落库即报 2013/2003，2026-09-04 单日 46 次实证；配合 qa.py
+                    #   _save_msg_resilient 重试双保险）
                     # - connect_timeout=10：建连超时，网络抖动时快速失败而不是无限挂起
                     #   （aiomysql 不支持 read/write 级超时，链路静默断连导致的读挂死仍需重启恢复）
                     "credentials": {
@@ -122,7 +125,7 @@ class Settings(BaseSettings):
                         "charset": "utf8mb4",
                         "minsize": 1,
                         "maxsize": 20,
-                        "pool_recycle": 3600,
+                        "pool_recycle": 300,
                         "connect_timeout": 10,
                     },
                 },

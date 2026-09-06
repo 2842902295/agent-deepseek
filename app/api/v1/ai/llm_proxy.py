@@ -24,6 +24,7 @@ Ollama=think、Claude=thinking.type、自部署=chat_template_kwargs。
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from types import SimpleNamespace
@@ -41,6 +42,15 @@ from app.langchain.model_selection import block_reasoning_levels
 router = APIRouter(prefix="/llm-proxy", tags=["LLM 代理"])
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+# 上游静默期 keepalive：dsh→代理这一跳有两层 ~300s 空闲断流——undici bodyTimeout
+# （按「原始字节」重置，注释行即可喂饱）与 pi-ai idleWatchdog（按「解析后事件」重置，
+# SSE 注释行不产事件、喂不到，须靠 cordis patch 的 streamIdleTimeoutMs 放大，
+# 见 qa_agent._build_cordis_patch_yml）。高强度思考下上游可长时间不吐字节
+# （max 档憋思考），静默会被透传导致 dsh 侧 300s 掐流 → TIMEOUT 进重试风暴。
+# 这里每 20s 注入一行 SSE 注释（": ping"），OpenAI SDK 的 SSE 解析器对 ":" 开头
+# 行直接跳过（streaming.mjs），对语义零影响。
+_PING_INTERVAL_S = 20.0
 
 
 def _check_loopback(request: Request) -> Optional[JSONResponse]:
@@ -96,16 +106,36 @@ async def _forward(block_key: str, request: Request, thinking: Optional[Union[bo
         logger.warning(f"[llm-proxy] 上游返回错误状态 block={block_key} model={cfg.model} status={up.status_code}")
 
     media = up.headers.get("content-type", "text/event-stream")
+    is_sse = "text/event-stream" in media
 
     async def _gen():
         first = True
+        # 用显式 task 包 __anext__：等待期间可超时注入 ping（上游静默保活），
+        # 消费方断开时在 finally 里取消在途读取并关流
+        pending: Optional[asyncio.Task] = None
+        it = up.aiter_raw().__aiter__()
         try:
-            async for chunk in up.aiter_raw():
+            while True:
+                if pending is None:
+                    pending = asyncio.ensure_future(it.__anext__())
+                done, _ = await asyncio.wait({pending}, timeout=_PING_INTERVAL_S)
+                if not done:
+                    if is_sse:
+                        yield b": ping\n\n"
+                    continue
+                try:
+                    chunk = pending.result()
+                except StopAsyncIteration:
+                    pending = None
+                    break
+                pending = None
                 if first:
                     first = False
                     logger.info(f"[perf] llm-proxy 上游首包 block={block_key}: {(time.monotonic() - t0) * 1000:.0f}ms")
                 yield chunk
         finally:
+            if pending is not None:
+                pending.cancel()
             await up.aclose()
             await client.aclose()
 

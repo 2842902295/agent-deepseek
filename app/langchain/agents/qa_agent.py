@@ -332,10 +332,7 @@ _SUBAGENT_DESCRIPTIONS = {
         "**所有知识库（库）操作**——条目检索、新建、更新、删除、合并、拆分，也是把对话内容沉淀入库的唯一途径。"
         "它看不到当前对话：你做初步整理（候选主题、正文素材、产物 ID），把素材完整写进描述，怎么入库由它决策。"
     ),
-    "chat-history": (
-        "**历史对话回溯唯一入口**——「我们之前聊过 xx 吗 / 上次说的 xx 是啥」这类跨会话翻旧账的问题一律委派。"
-        "把用户原话、候选关键词、时间线索写进描述；要排除当前会话时在描述里写明。"
-    ),
+    "chat-history": ("**历史对话回溯唯一入口**——「我们之前聊过 xx 吗 / 上次说的 xx 是啥」这类跨会话翻旧账的问题一律委派。把用户原话、候选关键词、时间线索写进描述；要排除当前会话时在描述里写明。"),
     "system-admin": (
         "**系统级管理唯一入口（超管专属）**——系统用户、模型配置、技能库、快捷功能、菜单/角色/授权、任意用户会话与定时任务排查。"
         "**写操作两段确认**：先向用户列全「将对谁、改什么、从什么变成什么」，取得确认后再次委派并在描述写明"
@@ -377,8 +374,7 @@ def _subagents_section(defs: list[dict]) -> str:
         lines.append(f"- `{d['name']}`：{_SUBAGENT_DESCRIPTIONS[d['name']]}")
     lines.append("")
     lines.append(
-        "其它互相独立、不依赖主对话上下文且上下文互扰的长任务，可自主委派通用 `subagent` 工具。"
-        "你负责任务拆解与结果汇总；转述子 agent 返回时，内部细节（表名/工具名/路径/id）一律翻译成业务语言。"
+        "其它互相独立、不依赖主对话上下文且上下文互扰的长任务，可自主委派通用 `subagent` 工具。你负责任务拆解与结果汇总；转述子 agent 返回时，内部细节（表名/工具名/路径/id）一律翻译成业务语言。"
     )
     return "\n".join(lines)
 
@@ -489,6 +485,7 @@ def _resolve_dsh_bin() -> str:
         if nvm_root.is_dir():
             candidates.extend(nvm_root.glob("*/bin/dsh"))
     if candidates:
+
         def _node_ver(p: Path) -> tuple[int, ...]:
             out: list[int] = []
             for seg in p.parent.parent.name.lstrip("v").split("."):
@@ -499,10 +496,7 @@ def _resolve_dsh_bin() -> str:
         best = max(candidates, key=_node_ver)
         logger.info(f"[dsh] PATH 里无 dsh，兜底命中 nvm 安装: {best}")
         return str(best)
-    raise RuntimeError(
-        f"找不到 dsh 运行载体：请全局安装 npm i -g @deepseek-ai/dsh@{_DSH_REQUIRED_VERSION}"
-        "（Node>=22.19），或用 env DSH_BIN 显式指定可执行文件路径。"
-    )
+    raise RuntimeError(f"找不到 dsh 运行载体：请全局安装 npm i -g @deepseek-ai/dsh@{_DSH_REQUIRED_VERSION}（Node>=22.19），或用 env DSH_BIN 显式指定可执行文件路径。")
 
 
 def _resolve_dsh_launch(dsh_bin: str) -> tuple[str, ...] | None:
@@ -622,6 +616,12 @@ def _build_cordis_patch_yml(
         "        displayName: 'cesi chat block'",
         "        apiKeyEnv: DSH_BLK_API_KEY",
         "        api: openai-completions",
+        # 流空闲看门狗：pi-ai 默认 300s（DEFAULT_STREAM_IDLE_TIMEOUT_MS），按「解析后
+        # 事件」计空闲——高强度思考下上游长时间静默必误杀，且 TIMEOUT 在 dsh-llm-retry
+        # 可重试白名单（默认 5 次），每次重试模型从零重思考 → 半小时级静默重试风暴。
+        # 放大到 30min；外层仍有 SDK request_timeout(≤6000s) 与回合分段看门狗兜底。
+        # 另一层 undici bodyTimeout(300s, 按原始字节) 由 llm_proxy 静默期 ping 注释行喂饱。
+        "        streamIdleTimeoutMs: 1800000",
         # 模型路由指向本服务回环代理：转发时按块配置显式注入 thinking 参数
         # （百炼 Qwen3 默认开思考，pi-ai 配置路径发不出 enable_thinking=false）；
         # thinking_level 非空时编进路径段（用户思考强度，代理按档位注入）
@@ -842,9 +842,8 @@ def _build_cordis_patch_yml(
 
     return "\n".join(lines) + "\n"
 
-def _build_mcp_servers(
-    user_id: Optional[int], is_super: bool, is_admin: bool, workspace: Path, gen_override_json: Optional[str] = None
-) -> list[dict]:
+
+def _build_mcp_servers(user_id: Optional[int], is_super: bool, is_admin: bool, workspace: Path, gen_override_json: Optional[str] = None) -> list[dict]:
     """默认 MCP 工具桥配置。
 
     首选 streamable-http 桥（FastAPI 内置，/mcp-bridge/stdtools/{uid}/mcp）：
@@ -1152,9 +1151,7 @@ class DshQaAgent:
         self._subagents = _subagent_defs(user_id, is_super)
 
         # system prompt（业务铁律 + 子 agent 委派节 + 专家人设 + 视觉通道节）
-        prompt = system_prompt if system_prompt is not None else _SYSTEM_PROMPT.format(
-            current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
+        prompt = system_prompt if system_prompt is not None else _SYSTEM_PROMPT.format(current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         prompt += "\n\n" + _subagents_section(self._subagents)
         if expert and (expert.get("instructions") or "").strip():
             desc = (expert.get("description") or "").strip()
@@ -1266,9 +1263,7 @@ class DshQaAgent:
             max_output_tokens=_DSH_MAX_OUTPUT_TOKENS,
             supports_vision=self._supports_vision,
             shell_timeout_ms=int(shell_timeout * 1000),
-            mcp_servers=mcp_servers
-            if mcp_servers is not None
-            else _build_mcp_servers(user_id, is_super, is_admin, self.workspace, gen_override_json),
+            mcp_servers=mcp_servers if mcp_servers is not None else _build_mcp_servers(user_id, is_super, is_admin, self.workspace, gen_override_json),
             skills_dirs=skills_dirs,
             subagents=self._subagents,
             connectors=self._connector_rows,
@@ -1854,14 +1849,19 @@ class DshQaAgent:
                     args = {}
                 # is_subagent 仅标记「子会话内部的再委派」（嵌套委派时该调用确实是委派动作），
                 # 普通工具只标 in_subagent——前端委派计数/摘要口径靠它区分
-                return [("process", {
-                    "kind": "tool_call",
-                    "item_id": f"sc{_child_seq[0]}",
-                    "tool": name,
-                    "args": args,
-                    "is_subagent": name in _sub_tool_names,
-                    "in_subagent": True,
-                })]
+                return [
+                    (
+                        "process",
+                        {
+                            "kind": "tool_call",
+                            "item_id": f"sc{_child_seq[0]}",
+                            "tool": name,
+                            "args": args,
+                            "is_subagent": name in _sub_tool_names,
+                            "in_subagent": True,
+                        },
+                    )
+                ]
             if etype == "tool/result":
                 _child_seq[0] += 1
                 msg = data.get("message") or {}
@@ -1882,15 +1882,20 @@ class DshQaAgent:
                 if len(content) > 50000:
                     content = content[:50000] + "\n…（子代理工具返回过长，已截断）"
                 _res_name = _child_call_names.get(call_id, "") or "tool"
-                return [("process", {
-                    "kind": "tool_result",
-                    "item_id": f"sr{_child_seq[0]}",
-                    "tool": _res_name,
-                    "content": content,
-                    "is_error": is_error,
-                    "is_subagent": _res_name in _sub_tool_names,
-                    "in_subagent": True,
-                })]
+                return [
+                    (
+                        "process",
+                        {
+                            "kind": "tool_result",
+                            "item_id": f"sr{_child_seq[0]}",
+                            "tool": _res_name,
+                            "content": content,
+                            "is_error": is_error,
+                            "is_subagent": _res_name in _sub_tool_names,
+                            "in_subagent": True,
+                        },
+                    )
+                ]
             return []
 
         def _on_notification(notification) -> None:
@@ -2023,6 +2028,7 @@ class DshQaAgent:
 
         降级影响：沉淀类任务不带主对话历史执行（trigger 文本里自带素材，基本可用）。
         """
+
         class _State:
             values: dict = {"messages": []}
 

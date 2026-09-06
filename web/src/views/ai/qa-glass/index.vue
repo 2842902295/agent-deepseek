@@ -2095,6 +2095,9 @@ async function sendSingle(text: string) {
   const findAssistantMsg = (): Message | undefined =>
     getMessageList(targetKey).find(m => m.id === assistantId);
 
+  // 断流恢复中标记：finally 不清 running（轮询接管，pollUntilDone 结束时自己清）
+  let recoveringPoll = false;
+
   try {
     const filePaths = attachedFiles.value.filter(f => f.path && !f.error).map(f => f.path);
     attachedFiles.value.forEach(f => f.previewUrl && URL.revokeObjectURL(f.previewUrl));
@@ -2248,7 +2251,22 @@ async function sendSingle(text: string) {
     pendingExpertKey.value = null;
   } catch (err: any) {
     const msg = findAssistantMsg();
-    if (msg) {
+    const disconnected = err?.message === 'stream-ended-without-terminal-event';
+    if (msg && disconnected) {
+      // 断流（SSE EOF 但无终态事件）：后端回合可能仍在跑（心跳/代理层故障、DB 瞬断旧 bug），
+      // 不再一律标错——能对上 DB（有 serverId）就地启动轮询恢复：后端仍在跑则增量合并
+      // 节流落库的进度，已结束则拉到终态并复位 loading（旧行为：气泡永久卡在生成中，只能刷新页面）
+      msg.currentTool = '';
+      if (targetKey && msg.serverId) {
+        recoveringPoll = true;
+        setRunning(targetKey, true);
+        pollUntilDone(targetKey);
+      } else {
+        // 早期断流（session 事件都没收到，无从对账 DB）：直接复位并提示
+        msg.loading = false;
+        msg.error = '连接中断，请重试';
+      }
+    } else if (msg) {
       if (err?.name !== 'AbortError') msg.error = err?.message || '请求失败';
       msg.loading = false;
       msg.currentTool = '';
@@ -2257,7 +2275,9 @@ async function sendSingle(text: string) {
     if (activeChatAborts[targetKey] === abortController) {
       delete activeChatAborts[targetKey];
     }
-    setRunning(targetKey, false);
+    if (!recoveringPoll) {
+      setRunning(targetKey, false);
+    }
     reloadSessions();
   }
 }

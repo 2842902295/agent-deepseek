@@ -1094,6 +1094,10 @@ export async function fetchQAChatStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  // 终态事件跟踪：后端异常路径（落库失败/进程重启/网络中断）可能让 SSE 干净 EOF
+  // 而没有任何终态事件——旧实现直接 return，调用方无从分辨「正常结束」与「断流」，
+  // 气泡永久停在生成中只能刷新页面。EOF 未见终态即抛错，交给调用方恢复逻辑。
+  let sawTerminal = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1103,14 +1107,24 @@ export async function fetchQAChatStream(
     buffer = lines.pop() ?? '';
     for (const line of lines) {
       if (line.startsWith('data: ')) {
+        let data: QAEvent;
         try {
-          const data = JSON.parse(line.slice(6)) as QAEvent;
-          onEvent(data);
+          data = JSON.parse(line.slice(6)) as QAEvent;
         } catch {
-          // 忽略解析异常
+          // 仅吞 JSON 解析异常
+          continue;
         }
+        // onEvent 移出 try：回调里的异常必须冒泡给调用方，不能被当成解析错误静默吞掉
+        if (data.type === 'done' || data.type === 'error' || data.type === 'aborted' || data.type === 'quota_exceeded') {
+          sawTerminal = true;
+        }
+        onEvent(data);
       }
     }
+  }
+
+  if (!sawTerminal) {
+    throw new Error('stream-ended-without-terminal-event');
   }
 }
 
